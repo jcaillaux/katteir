@@ -2,12 +2,12 @@
 //! the time takes `now`; nothing here reads the clock or allocates.
 //!
 //! ```text
-//! Idle ──start──▶ Working ──deadline──▶ Break ──dismiss (after min_break)──▶ Working
-//!                  │    ▲                  │
-//!             pause│    │start (resume)    │
-//!                  ▼    │                  │
-//!                 Paused                   │
-//! any state ──stop──▶ Idle ◀───────────────┘
+//! Idle ──start──▶ Working ──deadline──▶ Break ──break over, or dismiss──▶ Working
+//!                  │    ▲
+//!             pause│    │start (resume)
+//!                  ▼    │
+//!                 Paused
+//! any state ──stop──▶ Idle
 //! ```
 
 use std::time::{Duration, Instant};
@@ -19,7 +19,7 @@ pub struct TimerSettings {
     pub work: Duration,
     /// Zero turns the warning off.
     pub warn_before: Duration,
-    pub min_break: Duration,
+    pub break_length: Duration,
 }
 
 impl From<&TimerConfig> for TimerSettings {
@@ -27,7 +27,7 @@ impl From<&TimerConfig> for TimerSettings {
         Self {
             work: Duration::from_secs(u64::from(config.work_minutes) * 60),
             warn_before: Duration::from_secs(u64::from(config.warn_before_secs)),
-            min_break: Duration::from_secs(u64::from(config.min_break_secs)),
+            break_length: Duration::from_secs(u64::from(config.break_secs)),
         }
     }
 }
@@ -37,7 +37,7 @@ pub enum State {
     Idle,
     Working { deadline: Instant, warned: bool },
     Paused { remaining: Duration, warned: bool },
-    Break { started: Instant },
+    Break { ends: Instant },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,8 +49,6 @@ pub enum Event {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TimerError {
-    #[error("the break can be dismissed in {secs_left} s")]
-    TooEarly { secs_left: u32 },
     #[error("there is no break to dismiss")]
     NotOnBreak,
 }
@@ -61,9 +59,14 @@ pub struct Timer {
     state: State,
 }
 
+fn assert_valid(settings: &TimerSettings) {
+    assert!(settings.work > Duration::ZERO, "work duration must be positive");
+    assert!(settings.break_length > Duration::ZERO, "break length must be positive");
+}
+
 impl Timer {
     pub fn new(settings: TimerSettings) -> Self {
-        assert!(settings.work > Duration::ZERO, "work duration must be positive");
+        assert_valid(&settings);
         Self { settings, state: State::Idle }
     }
 
@@ -71,10 +74,10 @@ impl Timer {
         self.state
     }
 
-    /// New settings apply from the next work period; a running one keeps its
-    /// deadline.
+    /// New settings apply from the next work period or break; a running one
+    /// keeps its end time.
     pub fn set_settings(&mut self, settings: TimerSettings) {
-        assert!(settings.work > Duration::ZERO, "work duration must be positive");
+        assert_valid(&settings);
         self.settings = settings;
     }
 
@@ -100,28 +103,33 @@ impl Timer {
         self.state = State::Idle;
     }
 
-    /// Ends a break once `min_break` has passed, and starts the next work period.
+    /// Ends a break early (the hold-to-dismiss button) and starts the next
+    /// work period.
     pub fn dismiss(&mut self, now: Instant) -> Result<Event, TimerError> {
         let State::Break { .. } = self.state else {
             return Err(TimerError::NotOnBreak);
         };
-        let wait = self.dismissable_in(now);
-        if wait > Duration::ZERO {
-            return Err(TimerError::TooEarly { secs_left: whole_secs_up(wait) });
-        }
         self.state = State::Working { deadline: now + self.settings.work, warned: false };
         Ok(Event::BreakEnded)
     }
 
     /// Advances time: at most one event per call. If `now` jumped past both
     /// the warning and the deadline (e.g. after a suspend), only the break
-    /// starts.
+    /// starts; its end comes at a later tick.
     pub fn tick(&mut self, now: Instant) -> Option<Event> {
-        let State::Working { deadline, warned } = self.state else {
-            return None;
-        };
+        match self.state {
+            State::Working { deadline, warned } => self.tick_working(now, deadline, warned),
+            State::Break { ends } if now >= ends => {
+                self.state = State::Working { deadline: now + self.settings.work, warned: false };
+                Some(Event::BreakEnded)
+            }
+            State::Idle | State::Paused { .. } | State::Break { .. } => None,
+        }
+    }
+
+    fn tick_working(&mut self, now: Instant, deadline: Instant, warned: bool) -> Option<Event> {
         if now >= deadline {
-            self.state = State::Break { started: now };
+            self.state = State::Break { ends: now + self.settings.break_length };
             return Some(Event::BreakStarted);
         }
         let left = deadline - now;
@@ -132,21 +140,14 @@ impl Timer {
         Some(Event::NotifySoon { secs_left: whole_secs_up(left) })
     }
 
-    /// Time until the break while working or paused.
+    /// Time until the next change: until the break while working or paused,
+    /// until the end of the break during one.
     pub fn time_left(&self, now: Instant) -> Option<Duration> {
         match self.state {
             State::Working { deadline, .. } => Some(deadline.saturating_duration_since(now)),
             State::Paused { remaining, .. } => Some(remaining),
-            State::Idle | State::Break { .. } => None,
-        }
-    }
-
-    /// How long until a break may be dismissed; zero when it may (or when
-    /// not on a break).
-    pub fn dismissable_in(&self, now: Instant) -> Duration {
-        match self.state {
-            State::Break { started } => self.settings.min_break.saturating_sub(now.saturating_duration_since(started)),
-            _ => Duration::ZERO,
+            State::Break { ends } => Some(ends.saturating_duration_since(now)),
+            State::Idle => None,
         }
     }
 }
@@ -157,13 +158,19 @@ pub fn whole_secs_up(duration: Duration) -> u32 {
     u32::try_from(secs).unwrap_or(u32::MAX)
 }
 
+/// "m:ss", rounded up so a fresh 25-minute period shows 25:00.
+pub fn minutes_seconds(duration: Duration) -> String {
+    let secs = whole_secs_up(duration);
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const WORK_SECS: u64 = 25 * 60;
     const WARN_SECS: u64 = 60;
-    const MIN_BREAK_SECS: u64 = 30;
+    const BREAK_SECS: u64 = 300;
 
     fn secs(seconds: u64) -> Duration {
         Duration::from_secs(seconds)
@@ -176,7 +183,7 @@ mod tests {
     }
 
     fn settings(warn_secs: u64) -> TimerSettings {
-        TimerSettings { work: secs(WORK_SECS), warn_before: secs(warn_secs), min_break: secs(MIN_BREAK_SECS) }
+        TimerSettings { work: secs(WORK_SECS), warn_before: secs(warn_secs), break_length: secs(BREAK_SECS) }
     }
 
     fn timer() -> Timer {
@@ -193,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn full_cycle_warns_once_then_breaks() {
+    fn full_cycle_warns_breaks_and_resumes_by_itself() {
         let t0 = Instant::now();
         let mut timer = timer();
         timer.start(t0);
@@ -202,8 +209,11 @@ mod tests {
         assert_eq!(timer.tick(at(t0, WORK_SECS - WARN_SECS)), Some(Event::NotifySoon { secs_left: 60 }));
         assert_eq!(timer.tick(at(t0, WORK_SECS - 10)), None, "warns only once");
         assert_eq!(timer.tick(at(t0, WORK_SECS)), Some(Event::BreakStarted));
-        assert_eq!(timer.state(), State::Break { started: at(t0, WORK_SECS) });
-        assert_eq!(timer.tick(at(t0, WORK_SECS + 5)), None);
+        assert_eq!(timer.state(), State::Break { ends: at(t0, WORK_SECS + BREAK_SECS) });
+        assert_eq!(timer.time_left(at(t0, WORK_SECS + 100)), Some(secs(BREAK_SECS - 100)));
+        assert_eq!(timer.tick(at(t0, WORK_SECS + BREAK_SECS - 1)), None);
+        assert_eq!(timer.tick(at(t0, WORK_SECS + BREAK_SECS)), Some(Event::BreakEnded));
+        assert_eq!(timer.time_left(at(t0, WORK_SECS + BREAK_SECS)), Some(secs(WORK_SECS)), "next period");
     }
 
     #[test]
@@ -216,11 +226,14 @@ mod tests {
     }
 
     #[test]
-    fn jumping_past_the_deadline_skips_the_warning() {
+    fn a_long_jump_gives_one_event_per_tick() {
         let t0 = Instant::now();
         let mut timer = timer();
         timer.start(t0);
-        assert_eq!(timer.tick(at(t0, WORK_SECS + 3600)), Some(Event::BreakStarted));
+        let late = at(t0, WORK_SECS + BREAK_SECS + 3600);
+        assert_eq!(timer.tick(late), Some(Event::BreakStarted), "the warning is skipped");
+        assert_eq!(timer.tick(late), None, "the break starts now, it isn't over yet");
+        assert_eq!(timer.tick(at(t0, WORK_SECS + 2 * BREAK_SECS + 3600)), Some(Event::BreakEnded));
     }
 
     #[test]
@@ -236,17 +249,14 @@ mod tests {
     }
 
     #[test]
-    fn dismiss_waits_for_the_minimum_break() {
+    fn dismiss_ends_the_break_early() {
         let t0 = Instant::now();
         let mut timer = timer();
         timer.start(t0);
         assert_eq!(timer.tick(at(t0, WORK_SECS)), Some(Event::BreakStarted));
-        let early = at(t0, WORK_SECS + 10);
-        assert_eq!(timer.dismissable_in(early), secs(20));
-        assert_eq!(timer.dismiss(early), Err(TimerError::TooEarly { secs_left: 20 }));
-        let on_time = at(t0, WORK_SECS + MIN_BREAK_SECS);
-        assert_eq!(timer.dismiss(on_time), Ok(Event::BreakEnded));
-        assert_eq!(timer.time_left(on_time), Some(secs(WORK_SECS)), "the next work period starts");
+        assert_eq!(timer.dismiss(at(t0, WORK_SECS + 1)), Ok(Event::BreakEnded));
+        assert_eq!(timer.time_left(at(t0, WORK_SECS + 1)), Some(secs(WORK_SECS)), "the next work period starts");
+        assert_eq!(timer.tick(at(t0, WORK_SECS + BREAK_SECS)), None, "the old break end is gone");
     }
 
     #[test]
@@ -276,12 +286,17 @@ mod tests {
     }
 
     #[test]
-    fn start_while_working_or_on_break_changes_nothing() {
+    fn start_and_pause_are_ignored_during_a_break() {
         let t0 = Instant::now();
         let mut timer = timer();
         timer.start(t0);
         timer.start(at(t0, 100));
-        assert_eq!(timer.time_left(at(t0, 100)), Some(secs(WORK_SECS - 100)));
+        assert_eq!(timer.time_left(at(t0, 100)), Some(secs(WORK_SECS - 100)), "start while working");
+        assert_eq!(timer.tick(at(t0, WORK_SECS)), Some(Event::BreakStarted));
+        let on_break = timer.state();
+        timer.start(at(t0, WORK_SECS + 1));
+        timer.pause(at(t0, WORK_SECS + 2));
+        assert_eq!(timer.state(), on_break);
     }
 
     #[test]
@@ -289,11 +304,12 @@ mod tests {
         let t0 = Instant::now();
         let mut timer = timer();
         timer.start(t0);
-        timer.set_settings(TimerSettings { work: secs(60), warn_before: Duration::ZERO, min_break: Duration::ZERO });
-        assert_eq!(timer.time_left(t0), Some(secs(WORK_SECS)), "running period keeps its deadline");
+        timer.set_settings(TimerSettings { work: secs(60), warn_before: Duration::ZERO, break_length: secs(20) });
+        assert_eq!(timer.time_left(t0), Some(secs(WORK_SECS)), "the running period keeps its deadline");
         assert_eq!(timer.tick(at(t0, WORK_SECS)), Some(Event::BreakStarted));
-        assert_eq!(timer.dismiss(at(t0, WORK_SECS)), Ok(Event::BreakEnded));
-        assert_eq!(timer.time_left(at(t0, WORK_SECS)), Some(secs(60)));
+        assert_eq!(timer.time_left(at(t0, WORK_SECS)), Some(secs(20)), "the new break length");
+        assert_eq!(timer.tick(at(t0, WORK_SECS + 20)), Some(Event::BreakEnded));
+        assert_eq!(timer.time_left(at(t0, WORK_SECS + 20)), Some(secs(60)), "the new work length");
     }
 
     #[test]
@@ -304,8 +320,22 @@ mod tests {
     }
 
     #[test]
+    fn minutes_seconds_formats_the_countdown() {
+        assert_eq!(minutes_seconds(secs(WORK_SECS)), "25:00");
+        assert_eq!(minutes_seconds(Duration::from_millis(272_400)), "4:33");
+        assert_eq!(minutes_seconds(secs(9)), "0:09");
+        assert_eq!(minutes_seconds(Duration::ZERO), "0:00");
+    }
+
+    #[test]
     #[should_panic(expected = "work duration must be positive")]
     fn zero_work_is_rejected() {
-        let _ = Timer::new(TimerSettings { work: Duration::ZERO, warn_before: secs(WARN_SECS), min_break: secs(MIN_BREAK_SECS) });
+        let _ = Timer::new(TimerSettings { work: Duration::ZERO, warn_before: secs(WARN_SECS), break_length: secs(BREAK_SECS) });
+    }
+
+    #[test]
+    #[should_panic(expected = "break length must be positive")]
+    fn zero_break_is_rejected() {
+        let _ = Timer::new(TimerSettings { work: secs(WORK_SECS), warn_before: secs(WARN_SECS), break_length: Duration::ZERO });
     }
 }

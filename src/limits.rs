@@ -17,7 +17,8 @@ pub const MAX_CLIP_BYTES: u64 = 64 * 1024 * 1024;
 
 pub const WORK_MINUTES: RangeInclusive<u32> = 1..=180;
 pub const WARN_BEFORE_SECS: RangeInclusive<u32> = 0..=300;
-pub const MIN_BREAK_SECS: RangeInclusive<u32> = 0..=300;
+/// Break length: 10 s to an hour.
+pub const BREAK_SECS: RangeInclusive<u32> = 10..=3600;
 pub const DISMISS_HOLD_SECS: RangeInclusive<u32> = 1..=30;
 
 /// Cat names are directory names under `assets/cats/`.

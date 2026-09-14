@@ -1,0 +1,95 @@
+// The break window, always an overlay: fullscreen, frameless and see-through,
+// so the cat is drawn straight over the desktop. On X11, Windows and macOS it
+// also stays on top; Wayland has no way to ask for that (winit), so there it's
+// a fullscreen window like any other.
+export component CatWindow inherits Window {
+    title: "catnap";
+    no-frame: true;
+    background: transparent;
+    always-on-top: true;
+
+    in property <image> frame;
+    // Set to true just after the window shows: the cat slides in from the right.
+    in property <bool> arrived;
+    // Time left in the break, "m:ss".
+    in property <string> countdown;
+    in property <string> hold-text: "Hold to dismiss";
+    // 0..1, driven from Rust (hold.rs) while the button is held.
+    in property <float> hold-progress;
+    callback hold-pressed();
+    callback hold-released();
+
+    Image {
+        x: root.arrived ? 0px : root.width;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        source: root.frame;
+        image-fit: contain;
+        animate x {
+            duration: 3s;
+            easing: ease-out;
+        }
+    }
+
+    // Countdown badge: big white digits on an rgba(0,0,0,0.6) rounded box
+    // (CLAUDE.md §1). Fixed width, so it doesn't jitter as digits change.
+    Rectangle {
+        width: 180px;
+        height: 76px;
+        x: parent.width - self.width - 40px;
+        y: 40px;
+        border-radius: 14px;
+        background: #00000099;
+
+        Text {
+            text: root.countdown;
+            color: white;
+            font-size: 44px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Hold-to-dismiss: ends the break early. rgba(0,0,0,0.6) pill, filled
+    // from the left while held.
+    Rectangle {
+        width: 320px;
+        height: 56px;
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 64px;
+        border-radius: self.height / 2;
+        background: #00000099;
+        clip: true;
+
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width * root.hold-progress;
+            height: parent.height;
+            background: #ffffff55;
+        }
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            text: root.hold-progress > 0 ? "Keep holding…" : root.hold-text;
+            color: white;
+            font-size: 18px;
+        }
+
+        TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    root.hold-pressed();
+                } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    root.hold-released();
+                }
+            }
+        }
+    }
+}

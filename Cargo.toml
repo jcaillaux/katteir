@@ -12,6 +12,10 @@ slint = { version = "=1.17.1", default-features = false, features = ["std", "com
 # Only to switch a feature on (cargo unifies features): fontconfig is loaded at
 # runtime instead of linked, so building needs no libfontconfig-dev.
 i-slint-common = { version = "=1.17.1", default-features = false, features = ["fontconfig-dlopen"] }
+# AV1 decoding, linked statically from .deps/ (the Makefile builds it).
+dav1d = "=0.11.1"
+# Raw GL for the video shader, only in src/video/gl.rs.
+glow = "=0.18.0"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.6"
 directories = "6.0.0"

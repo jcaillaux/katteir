@@ -1,21 +1,26 @@
 //! catnap: every N minutes of work, a cat takes over the screen for a break.
 //! Wiring only (CLAUDE.md §3): load the config, show the settings window,
-//! drive the timer. The cat window arrives in M1.
+//! drive the timer, and show the cat window during breaks.
 
+mod cats;
 mod config;
+mod hold;
 mod limits;
+mod overlay;
 mod timer;
 mod video;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use slint::ComponentHandle;
 
-use crate::config::{Config, DisplayMode};
+use crate::cats::CatClips;
+use crate::config::Config;
+use crate::overlay::Overlay;
 use crate::timer::{Event, State, Timer, TimerSettings};
 
 slint::include_modules!();
@@ -27,9 +32,19 @@ struct App {
     config: Config,
     config_path: PathBuf,
     timer: Timer,
+    /// The configured clips, loaded at the first break and kept until the
+    /// cat settings change (CLAUDE.md §4: load a cat's clips once).
+    cat_clips: Option<CatClips>,
 }
 
-type Shared = Rc<RefCell<App>>;
+/// What every callback needs: the app state, and weak handles on both
+/// windows so no callback keeps a window alive.
+#[derive(Clone)]
+struct Ctx {
+    app: Rc<RefCell<App>>,
+    ui: slint::Weak<SettingsWindow>,
+    overlay: Weak<Overlay>,
+}
 
 fn main() -> anyhow::Result<()> {
     // Our own messages at info, dependencies (zbus, winit...) only from warn.
@@ -45,13 +60,17 @@ fn main() -> anyhow::Result<()> {
     ui.set_notice_is_warning(!notice.is_empty());
     ui.set_notice(notice.into());
     ui.set_config_path(config_path.display().to_string().into());
+    let overlay = Overlay::new()?;
 
     let timer = Timer::new(TimerSettings::from(&config.timer));
-    let app: Shared = Rc::new(RefCell::new(App { config, config_path, timer }));
-    wire_timer_buttons(&ui, &app);
-    wire_settings(&ui, &app);
-    let _ticker = start_ticker(&ui, &app);
-    refresh_status(&ui, &app.borrow().timer, Instant::now());
+    let app = Rc::new(RefCell::new(App { config, config_path, timer, cat_clips: None }));
+    let ctx = Ctx { app, ui: ui.as_weak(), overlay: Rc::downgrade(&overlay) };
+    wire_timer_buttons(&ui, &ctx);
+    wire_settings(&ui, &ctx);
+    let dismiss_ctx = ctx.clone();
+    overlay.on_dismissed(move || dismiss_ctx.dismiss_break());
+    let _ticker = start_ticker(&ctx);
+    ctx.after_timer_change(Instant::now());
 
     ui.run()?;
     Ok(())
@@ -89,19 +108,15 @@ fn ui_range(range: &std::ops::RangeInclusive<u32>) -> IntRange {
 fn set_limits(ui: &SettingsWindow) {
     ui.set_work_range(ui_range(&limits::WORK_MINUTES));
     ui.set_warn_range(ui_range(&limits::WARN_BEFORE_SECS));
-    ui.set_min_break_range(ui_range(&limits::MIN_BREAK_SECS));
+    ui.set_break_range(ui_range(&limits::BREAK_SECS));
     ui.set_hold_range(ui_range(&limits::DISMISS_HOLD_SECS));
 }
 
 fn show_config(ui: &SettingsWindow, config: &Config) {
     ui.set_work_minutes(to_ui(config.timer.work_minutes));
     ui.set_warn_before_secs(to_ui(config.timer.warn_before_secs));
-    ui.set_min_break_secs(to_ui(config.timer.min_break_secs));
+    ui.set_break_secs(to_ui(config.timer.break_secs));
     ui.set_dismiss_hold_secs(to_ui(config.display.dismiss_hold_secs));
-    ui.set_display_mode(match config.display.mode {
-        DisplayMode::Fullscreen => 0,
-        DisplayMode::Overlay => 1,
-    });
     let entry = path_text(config.cat.entry_clip.as_deref());
     let looped = path_text(config.cat.loop_clip.as_deref());
     show_clip_status(ui, 0, &entry);
@@ -119,9 +134,8 @@ fn read_config(ui: &SettingsWindow, base: &Config) -> Config {
     let mut config = base.clone();
     config.timer.work_minutes = from_ui(ui.get_work_minutes());
     config.timer.warn_before_secs = from_ui(ui.get_warn_before_secs());
-    config.timer.min_break_secs = from_ui(ui.get_min_break_secs());
+    config.timer.break_secs = from_ui(ui.get_break_secs());
     config.display.dismiss_hold_secs = from_ui(ui.get_dismiss_hold_secs());
-    config.display.mode = if ui.get_display_mode() == 1 { DisplayMode::Overlay } else { DisplayMode::Fullscreen };
     config.cat.entry_clip = clip_from_text(&ui.get_entry_clip());
     config.cat.loop_clip = clip_from_text(&ui.get_loop_clip());
     config
@@ -154,55 +168,154 @@ fn clip_status(text: &str) -> (String, i32) {
     }
     match video::probe_clip(&path) {
         Ok(clip) => (
-            format!("AV1 clip, {}×{}, {} frames at {:.0} fps", clip.width_px, clip.picture_height_px, clip.frames, clip.fps),
+            format!("AV1 clip, {}×{}, {} frames at {} fps", clip.width_px, clip.picture_height_px, clip.frames, clip.fps),
             1,
         ),
         Err(error) => (error.to_string(), 2),
     }
 }
 
-fn wire_timer_buttons(ui: &SettingsWindow, app: &Shared) {
-    let on_timer = |ui: &SettingsWindow, action: fn(&mut Timer, Instant)| {
-        let (weak, app) = (ui.as_weak(), app.clone());
+fn wire_timer_buttons(ui: &SettingsWindow, ctx: &Ctx) {
+    let on_timer = |action: fn(&mut Timer, Instant)| {
+        let ctx = ctx.clone();
         move || {
             let now = Instant::now();
-            let mut app = app.borrow_mut();
-            action(&mut app.timer, now);
-            if let Some(ui) = weak.upgrade() {
-                refresh_status(&ui, &app.timer, now);
-            }
+            action(&mut ctx.app.borrow_mut().timer, now);
+            ctx.after_timer_change(now);
         }
     };
-    ui.on_start(on_timer(ui, Timer::start));
-    ui.on_pause(on_timer(ui, Timer::pause));
-    ui.on_stop(on_timer(ui, |timer, _| timer.stop()));
-    let (weak, app) = (ui.as_weak(), app.clone());
-    ui.on_dismiss_break(move || {
-        let Some(ui) = weak.upgrade() else { return };
-        let now = Instant::now();
-        let mut app = app.borrow_mut();
-        match app.timer.dismiss(now) {
-            Ok(event) => handle_event(&ui, event),
-            Err(error) => {
-                ui.set_notice(error.to_string().into());
-                ui.set_notice_is_warning(false);
-            }
-        }
-        refresh_status(&ui, &app.timer, now);
-    });
+    ui.on_start(on_timer(Timer::start));
+    ui.on_pause(on_timer(Timer::pause));
+    ui.on_stop(on_timer(|timer, _| timer.stop()));
 }
 
-fn wire_settings(ui: &SettingsWindow, app: &Shared) {
+fn wire_settings(ui: &SettingsWindow, ctx: &Ctx) {
     let weak = ui.as_weak();
     ui.on_clip_edited(move |which, text| {
         if let Some(ui) = weak.upgrade() {
             show_clip_status(&ui, which, &text);
         }
     });
-    let (weak, app) = (ui.as_weak(), app.clone());
-    ui.on_save(move || {
-        let Some(ui) = weak.upgrade() else { return };
-        let mut app = app.borrow_mut();
+    let ctx = ctx.clone();
+    ui.on_save(move || ctx.save());
+}
+
+fn start_ticker(ctx: &Ctx) -> slint::Timer {
+    let ctx = ctx.clone();
+    let ticker = slint::Timer::default();
+    ticker.start(slint::TimerMode::Repeated, TICK, move || {
+        let now = Instant::now();
+        let event = ctx.app.borrow_mut().timer.tick(now);
+        if let Some(event) = event {
+            ctx.handle_event(event);
+        }
+        ctx.after_timer_change(now);
+    });
+    ticker
+}
+
+impl Ctx {
+    fn with_ui(&self, action: impl FnOnce(&SettingsWindow)) {
+        if let Some(ui) = self.ui.upgrade() {
+            action(&ui);
+        }
+    }
+
+    fn set_notice(&self, notice: String, is_warning: bool) {
+        self.with_ui(|ui| {
+            ui.set_notice(notice.into());
+            ui.set_notice_is_warning(is_warning);
+        });
+    }
+
+    /// Refreshes the settings window, and keeps the cat window in step with
+    /// the timer: its countdown during a break, hidden otherwise (Stop
+    /// during a break hides the cat, for example).
+    fn after_timer_change(&self, now: Instant) {
+        let app = self.app.borrow();
+        if let Some(overlay) = self.overlay.upgrade() {
+            match (app.timer.state(), app.timer.time_left(now)) {
+                (State::Break { .. }, Some(left)) => overlay.set_break_left(left),
+                _ => overlay.hide(),
+            }
+        }
+        self.with_ui(|ui| refresh_status(ui, &app.timer, now));
+    }
+
+    /// Ends the break early: the cat window's hold-to-dismiss button.
+    fn dismiss_break(&self) {
+        let now = Instant::now();
+        let result = self.app.borrow_mut().timer.dismiss(now);
+        match result {
+            Ok(event) => self.handle_event(event),
+            Err(error) => log::debug!("dismiss ignored: {error}"),
+        }
+        self.after_timer_change(now);
+    }
+
+    fn handle_event(&self, event: Event) {
+        let (notice, is_warning) = match event {
+            Event::NotifySoon { secs_left } => (format!("Break in {secs_left} s."), false),
+            Event::BreakStarted => self.start_cat(),
+            Event::BreakEnded => ("Back to work.".to_owned(), false),
+        };
+        log::info!("{event:?}: {notice}");
+        self.set_notice(notice, is_warning);
+    }
+
+    /// Shows the cat window for a break that just started. Returns the notice
+    /// and whether it's a warning.
+    fn start_cat(&self) -> (String, bool) {
+        let (clips, problem) = self.cat_clips();
+        let Some(clips) = clips else {
+            return (format!("Break time! No cat can be shown: {problem}"), true);
+        };
+        let hold_secs = self.app.borrow().config.display.dismiss_hold_secs;
+        let Some(overlay) = self.overlay.upgrade() else {
+            return ("Break time!".to_owned(), false);
+        };
+        match overlay.show(&clips, Duration::from_secs(u64::from(hold_secs))) {
+            Ok(()) if problem.is_empty() => ("Break time!".to_owned(), false),
+            Ok(()) => (format!("Break time! Showing the placeholder cat: {problem}"), true),
+            Err(error) => {
+                log::error!("{error}");
+                (format!("Break time! The cat window failed: {error}"), true)
+            }
+        }
+    }
+
+    /// The cat for this break: the configured clips when usable, else the
+    /// placeholder. Returns why the configured clips weren't used, if they
+    /// were set. Only the configured clips are cached, so a clip on a drive
+    /// that gets mounted later is picked up at the next break.
+    fn cat_clips(&self) -> (Option<CatClips>, String) {
+        let mut app = self.app.borrow_mut();
+        if let Some(clips) = &app.cat_clips {
+            return (Some(clips.clone()), String::new());
+        }
+        let problem = match cats::configured(&app.config) {
+            Some(Ok(clips)) => {
+                app.cat_clips = Some(clips.clone());
+                return (Some(clips), String::new());
+            }
+            Some(Err(error)) => {
+                log::warn!("the configured clips can't be used ({error}); showing the placeholder");
+                error.to_string()
+            }
+            None => String::new(),
+        };
+        match cats::placeholder() {
+            Ok(clips) => (Some(clips), problem),
+            Err(error) => {
+                log::error!("the placeholder cat is broken: {error}");
+                (None, error.to_string())
+            }
+        }
+    }
+
+    fn save(&self) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let mut app = self.app.borrow_mut();
         let mut config = read_config(&ui, &app.config);
         let adjusted = config.sanitise();
         let (notice, is_warning) = match config::save_file(&app.config_path, &config) {
@@ -210,12 +323,15 @@ fn wire_settings(ui: &SettingsWindow, app: &Shared) {
             Err(error) => (format!("Not saved: {error}"), true),
         };
         log::info!("{notice}");
+        if config.cat != app.config.cat {
+            app.cat_clips = None;
+        }
         app.timer.set_settings(TimerSettings::from(&config.timer));
         show_config(&ui, &config);
         app.config = config;
         ui.set_notice(notice.into());
         ui.set_notice_is_warning(is_warning);
-    });
+    }
 }
 
 /// Clip problems never stop a save (a clip may be on a drive that isn't
@@ -249,55 +365,17 @@ fn saved_notice(adjusted: &[config::Adjusted], warnings: &[String]) -> (String, 
     (notice, !adjusted.is_empty() || !warnings.is_empty())
 }
 
-fn start_ticker(ui: &SettingsWindow, app: &Shared) -> slint::Timer {
-    let (weak, app) = (ui.as_weak(), app.clone());
-    let ticker = slint::Timer::default();
-    ticker.start(slint::TimerMode::Repeated, TICK, move || {
-        let Some(ui) = weak.upgrade() else { return };
-        let now = Instant::now();
-        let mut app = app.borrow_mut();
-        if let Some(event) = app.timer.tick(now) {
-            handle_event(&ui, event);
-        }
-        refresh_status(&ui, &app.timer, now);
-    });
-    ticker
-}
-
-/// Until the cat window (M1) and notifications (M2) exist, events are logged
-/// and shown as a notice.
-fn handle_event(ui: &SettingsWindow, event: Event) {
-    let notice = match event {
-        Event::NotifySoon { secs_left } => format!("Break in {secs_left} s."),
-        Event::BreakStarted => "Break time! (The cat window arrives in M1.)".to_owned(),
-        Event::BreakEnded => "Back to work.".to_owned(),
-    };
-    log::info!("{event:?}: {notice}");
-    ui.set_notice(notice.into());
-    ui.set_notice_is_warning(false);
-}
-
 fn refresh_status(ui: &SettingsWindow, timer: &Timer, now: Instant) {
-    let left = timer.time_left(now).map(minutes_seconds).unwrap_or_default();
-    let status = match timer.state() {
+    let left = timer.time_left(now).map(timer::minutes_seconds).unwrap_or_default();
+    let state = timer.state();
+    let status = match state {
         State::Idle => "Idle".to_owned(),
         State::Working { .. } => format!("Working: break in {left}"),
         State::Paused { .. } => format!("Paused: {left} left"),
-        State::Break { .. } => match timer::whole_secs_up(timer.dismissable_in(now)) {
-            0 => "Break: the cat can be dismissed".to_owned(),
-            wait => format!("Break: can be dismissed in {wait} s"),
-        },
+        State::Break { .. } => format!("Break: {left} left"),
     };
-    let state = timer.state();
     ui.set_status(status.into());
     ui.set_can_start(matches!(state, State::Idle | State::Paused { .. }));
     ui.set_can_pause(matches!(state, State::Working { .. }));
     ui.set_can_stop(!matches!(state, State::Idle));
-    ui.set_can_dismiss(matches!(state, State::Break { .. }) && timer.dismissable_in(now).is_zero());
-}
-
-/// "mm:ss", rounded up so a fresh 25-minute period shows 25:00.
-fn minutes_seconds(duration: Duration) -> String {
-    let secs = timer::whole_secs_up(duration);
-    format!("{}:{:02}", secs / 60, secs % 60)
 }

@@ -32,13 +32,13 @@ pub struct TimerConfig {
     pub work_minutes: u32,
     /// 0 turns the warning off.
     pub warn_before_secs: u32,
-    /// The break can't be dismissed before this.
-    pub min_break_secs: u32,
+    /// How long a break lasts; the cat window counts it down.
+    pub break_secs: u32,
 }
 
 impl Default for TimerConfig {
     fn default() -> Self {
-        Self { work_minutes: 25, warn_before_secs: 60, min_break_secs: 30 }
+        Self { work_minutes: 25, warn_before_secs: 60, break_secs: 300 }
     }
 }
 
@@ -60,24 +60,18 @@ impl Default for CatConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DisplayMode {
-    #[default]
-    Fullscreen,
-    Overlay,
-}
-
+/// The cat window. It's always an overlay: fullscreen, see-through, on top
+/// where the platform allows (CLAUDE.md §5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DisplayConfig {
-    pub mode: DisplayMode,
+    /// How long the dismiss button must be held to end a break early.
     pub dismiss_hold_secs: u32,
 }
 
 impl Default for DisplayConfig {
     fn default() -> Self {
-        Self { mode: DisplayMode::Fullscreen, dismiss_hold_secs: 5 }
+        Self { dismiss_hold_secs: 5 }
     }
 }
 
@@ -105,7 +99,7 @@ impl Config {
         let mut adjusted = Vec::new();
         clamp_field(&mut self.timer.work_minutes, &limits::WORK_MINUTES, "timer.work_minutes", &mut adjusted);
         clamp_field(&mut self.timer.warn_before_secs, &limits::WARN_BEFORE_SECS, "timer.warn_before_secs", &mut adjusted);
-        clamp_field(&mut self.timer.min_break_secs, &limits::MIN_BREAK_SECS, "timer.min_break_secs", &mut adjusted);
+        clamp_field(&mut self.timer.break_secs, &limits::BREAK_SECS, "timer.break_secs", &mut adjusted);
         clamp_field(&mut self.display.dismiss_hold_secs, &limits::DISMISS_HOLD_SECS, "display.dismiss_hold_secs", &mut adjusted);
         if !is_valid_cat_name(&self.cat.name) {
             DEFAULT_CAT.clone_into(&mut self.cat.name);
@@ -122,7 +116,7 @@ impl Config {
         let clip_ok = |clip: &Option<PathBuf>| clip.as_deref().is_none_or(is_usable_clip_path);
         limits::WORK_MINUTES.contains(&self.timer.work_minutes)
             && limits::WARN_BEFORE_SECS.contains(&self.timer.warn_before_secs)
-            && limits::MIN_BREAK_SECS.contains(&self.timer.min_break_secs)
+            && limits::BREAK_SECS.contains(&self.timer.break_secs)
             && limits::DISMISS_HOLD_SECS.contains(&self.display.dismiss_hold_secs)
             && is_valid_cat_name(&self.cat.name)
             && clip_ok(&self.cat.entry_clip)
@@ -130,7 +124,6 @@ impl Config {
     }
 
     /// The configured clips, only when both are set.
-    #[allow(dead_code)] // Used by the cat window (M1).
     pub fn clips(&self) -> Option<(&Path, &Path)> {
         Some((self.cat.entry_clip.as_deref()?, self.cat.loop_clip.as_deref()?))
     }
@@ -224,7 +217,7 @@ mod tests {
 [timer]
 work_minutes = 50
 warn_before_secs = 30
-min_break_secs = 120
+break_secs = 120
 
 [cat]
 name = "ginger"
@@ -232,7 +225,6 @@ entry_clip = "/clips/entry.ivf"
 loop_clip = "/clips/loop.ivf"
 
 [display]
-mode = "overlay"
 dismiss_hold_secs = 3
 "#;
 
@@ -257,7 +249,8 @@ dismiss_hold_secs = 3
         let (config, adjusted) = from_toml(FULL).expect("parses");
         assert!(adjusted.is_empty());
         assert_eq!(config.timer.work_minutes, 50);
-        assert_eq!(config.display.mode, DisplayMode::Overlay);
+        assert_eq!(config.timer.break_secs, 120);
+        assert_eq!(config.display.dismiss_hold_secs, 3);
         assert_eq!(config.clips(), Some((Path::new("/clips/entry.ivf"), Path::new("/clips/loop.ivf"))));
         let (again, _) = from_toml(&to_toml(&config).expect("serialises")).expect("parses");
         assert_eq!(again, config);
@@ -267,7 +260,7 @@ dismiss_hold_secs = 3
     fn missing_fields_take_defaults() {
         let (config, _) = from_toml("[timer]\nwork_minutes = 40\n").expect("parses");
         assert_eq!(config.timer.work_minutes, 40);
-        assert_eq!(config.timer.min_break_secs, TimerConfig::default().min_break_secs);
+        assert_eq!(config.timer.break_secs, TimerConfig::default().break_secs);
         assert_eq!(config.cat, CatConfig::default());
     }
 
@@ -318,8 +311,16 @@ dismiss_hold_secs = 3
     #[test]
     fn unknown_fields_and_bad_values_are_errors() {
         assert!(matches!(from_toml("[timer]\nwork_hours = 1\n"), Err(ConfigError::Parse(_))));
-        assert!(matches!(from_toml("[display]\nmode = \"window\"\n"), Err(ConfigError::Parse(_))));
+        assert!(matches!(from_toml("[timer]\nbreak_secs = \"long\"\n"), Err(ConfigError::Parse(_))));
         assert!(matches!(from_toml("[timer]\nwork_minutes = -5\n"), Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn keys_removed_in_m1_are_rejected() {
+        // `min_break_secs` became `break_secs`, and the cat window is always an
+        // overlay now, so `mode` is gone. Old files get a clear error.
+        assert!(matches!(from_toml("[timer]\nmin_break_secs = 30\n"), Err(ConfigError::Parse(_))));
+        assert!(matches!(from_toml("[display]\nmode = \"fullscreen\"\n"), Err(ConfigError::Parse(_))));
     }
 
     #[test]

@@ -1,13 +1,12 @@
 # catnap developer entry points. `make help` lists them.
 #
-# `make run` builds and launches catnap (M0: the settings window and timer).
-# The AV1 video spike (spikes/av1-video) has its own targets; it needs dav1d,
-# which is built into .deps/ on first use together with the tools to build it
-# (meson and ninja from PyPI in a virtualenv, nasm from a checksummed source
-# tarball). No sudo needed.
+# `make run` builds and launches catnap. catnap and the AV1 video spike both
+# need dav1d, which is built into .deps/ on first use together with the tools
+# to build it (meson and ninja from PyPI in a virtualenv, nasm from a
+# checksummed source tarball). No sudo needed.
 #
-# catnap needs: cargo and a C toolchain (cc).
-# The spike also needs: git, python3 with venv, curl, tar, sha256sum, pkg-config.
+# Needs: cargo, a C toolchain (cc), git, python3 with venv, make, curl, tar,
+# sha256sum, pkg-config.
 
 BIN       := target/release/catnap
 SPIKE     := spikes/av1-video
@@ -49,18 +48,18 @@ export SYSTEM_DEPS_DAV1D_LINK := static
 
 .PHONY: help run build test clippy clean \
 	run-spike run-spike-break build-spike test-spike clean-spike \
-	deps check-tools check-spike-tools clean-deps
+	deps check-tools clean-deps
 
 help:
 	@echo "make run              build and launch catnap"
-	@echo "make build            release build of catnap"
+	@echo "make build            release build of catnap (builds dav1d first if needed)"
 	@echo "make test             catnap unit tests"
 	@echo "make clippy           clippy on catnap, warnings as errors"
 	@echo "make clean            remove catnap's build output"
 	@echo ""
 	@echo "make run-spike        build and launch the AV1 video spike (1280x720 window)"
 	@echo "make run-spike-break  same, fullscreen and see-through: the cat over the desktop"
-	@echo "make build-spike      release build of the spike (builds dav1d first if needed)"
+	@echo "make build-spike      release build of the spike"
 	@echo "make test-spike       the spike's unit tests"
 	@echo "make clean-spike      remove the spike's build output"
 	@echo "make deps             build dav1d $(DAV1D_TAG) and its build tools into .deps/"
@@ -72,13 +71,13 @@ help:
 run: build
 	$(BIN)
 
-build: check-tools
+build: check-tools $(DAV1D_LIB)
 	cargo build --release
 
-test: check-tools
+test: check-tools $(DAV1D_LIB)
 	cargo test --release
 
-clippy: check-tools
+clippy: check-tools $(DAV1D_LIB)
 	cargo clippy --release --all-targets -- -D warnings
 
 clean:
@@ -93,20 +92,22 @@ run-spike: build-spike $(ENTRY) $(LOOP)
 run-spike-break:
 	@$(MAKE) --no-print-directory run-spike SEE_THROUGH=1 FULLSCREEN=1
 
-build-spike: check-spike-tools $(DAV1D_LIB)
+build-spike: check-tools $(DAV1D_LIB)
 	cargo build --release --manifest-path $(SPIKE)/Cargo.toml
 
-test-spike: check-spike-tools $(DAV1D_LIB)
+test-spike: check-tools $(DAV1D_LIB)
 	cargo test --release --manifest-path $(SPIKE)/Cargo.toml
 
 clean-spike:
 	cargo clean --manifest-path $(SPIKE)/Cargo.toml
 
+# ---- dav1d and its build tools ------------------------------------------------
+
 deps: $(DAV1D_LIB)
 
 # Order-only prerequisites (after `|`): run the check first without forcing
 # a rebuild of the file targets.
-$(DAV1D_LIB): $(TOOLS)/meson $(TOOLS)/ninja $(TOOLS)/nasm | check-spike-tools
+$(DAV1D_LIB): $(TOOLS)/meson $(TOOLS)/ninja $(TOOLS)/nasm | check-tools
 	rm -rf $(DAV1D_SRC) $(DEPS)/build-dav1d
 	git clone --quiet --depth 1 --branch $(DAV1D_TAG) https://code.videolan.org/videolan/dav1d.git $(DAV1D_SRC)
 	meson setup $(DEPS)/build-dav1d $(DAV1D_SRC) --buildtype=release --default-library=static \
@@ -114,14 +115,14 @@ $(DAV1D_LIB): $(TOOLS)/meson $(TOOLS)/ninja $(TOOLS)/nasm | check-spike-tools
 		--prefix=$(DAV1D) --libdir=lib
 	ninja -C $(DEPS)/build-dav1d install
 
-$(TOOLS)/meson $(TOOLS)/ninja &: | check-spike-tools
+$(TOOLS)/meson $(TOOLS)/ninja &: | check-tools
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --quiet --disable-pip-version-check meson==$(MESON_VERSION) ninja==$(NINJA_VERSION)
 	mkdir -p $(TOOLS)
 	ln -sf $(VENV)/bin/meson $(TOOLS)/meson
 	ln -sf $(VENV)/bin/ninja $(TOOLS)/ninja
 
-$(TOOLS)/nasm: | check-spike-tools
+$(TOOLS)/nasm: | check-tools
 	rm -rf $(NASM_SRC) $(DEPS)/src/nasm.tar.xz
 	mkdir -p $(DEPS)/src $(TOOLS)
 	curl -sSfL -o $(DEPS)/src/nasm.tar.xz https://www.nasm.us/pub/nasm/releasebuilds/$(NASM_VERSION)/nasm-$(NASM_VERSION).tar.xz
@@ -133,28 +134,17 @@ $(TOOLS)/nasm: | check-spike-tools
 clean-deps:
 	rm -rf $(DEPS)
 
-# ---- prerequisite checks ----------------------------------------------------
+# ---- prerequisite check -------------------------------------------------------
 
 check-tools:
 	@missing=""; \
-	for tool in cargo cc; do \
-		command -v $$tool >/dev/null 2>&1 || missing="$$missing $$tool"; \
-	done; \
-	if [ -n "$$missing" ]; then \
-		echo "missing:$$missing" >&2; \
-		echo "Debian/Ubuntu: sudo apt install build-essential; Rust via https://rustup.rs" >&2; \
-		exit 1; \
-	fi
-
-check-spike-tools: check-tools
-	@missing=""; \
-	for tool in git python3 make curl tar sha256sum pkg-config; do \
+	for tool in cargo cc git python3 make curl tar sha256sum pkg-config; do \
 		command -v $$tool >/dev/null 2>&1 || missing="$$missing $$tool"; \
 	done; \
 	python3 -c 'import venv, ensurepip' 2>/dev/null || missing="$$missing python3-venv"; \
 	if [ -n "$$missing" ]; then \
 		echo "missing:$$missing" >&2; \
-		echo "Debian/Ubuntu: sudo apt install git python3-venv curl pkg-config" >&2; \
+		echo "Debian/Ubuntu: sudo apt install build-essential git python3-venv curl pkg-config; Rust via https://rustup.rs" >&2; \
 		exit 1; \
 	fi
 
