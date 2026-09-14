@@ -1,0 +1,31 @@
+Model: ByteDance Seedance 2.5, on easemate.ai (2026-09-14)
+Mode: text to video, no reference image
+Settings: 30 s, 16:9, 720p (audio generated, then dropped)
+
+Photorealistic video of one adult ginger tabby cat with short fur and amber
+eyes, in an empty photo studio with a seamless backdrop: floor and wall are
+one flat, uniform pale blue-grey colour, no texture, no horizon line, no
+objects. Soft, even, diffuse lighting with no hard shadows. Medium shot at the
+cat's eye level: the cat fills most of the frame height, its whole body always
+visible with a small margin, never cut off by the frame edges.
+
+0–4 s: the cat walks calmly toward the left of the frame in side profile,
+facing left, with a relaxed, steady gait. Tracking shot: the camera moves
+sideways with the cat at exactly its speed, so the cat stays centred in the
+frame while it walks.
+
+4 s: the cat stops walking and the camera stops with it. From here to the
+end, the camera is completely still: locked off, no pan, no zoom, no drift,
+no shake.
+
+4–11 s: the cat turns around once on the spot, lies down, curls up into a
+ball with its tail wrapped around its body and its head resting on its paws,
+and slowly closes its eyes.
+
+11–30 s: the cat stays asleep, curled up in the same place and position. It
+breathes slowly and steadily, and once its ear twitches slightly. It does not
+open its eyes, lift its head, stretch, stand up or move away.
+
+One single continuous shot, no cuts, no transitions. Only the cat: no other
+animals, no people, no furniture, no cushion, no text, no logo, no watermark.
+Natural, realistic cat anatomy and movement.

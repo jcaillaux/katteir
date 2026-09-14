@@ -91,6 +91,15 @@ mod tests {
     }
 
     #[test]
+    fn the_ginger_cat_is_a_valid_pair() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/cats/ginger");
+        let clips = load_pair(&dir.join("entry.ivf"), &dir.join("sleep.ivf")).expect("the ginger cat's clips pair up");
+        assert_eq!(clips.entry.stacked_size_px(), (1280, 1440));
+        assert_eq!((clips.entry.fps(), clips.looped.fps()), (24, 12));
+        assert_eq!((clips.entry.frame_count(), clips.looped.frame_count()), (424, 112));
+    }
+
+    #[test]
     fn different_sizes_are_rejected() {
         let error = pair(clip(640, 720, 15), clip(1280, 1440, 15)).err().expect("mismatch");
         assert!(matches!(error, CatError::SizeMismatch { .. }));

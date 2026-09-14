@@ -47,7 +47,7 @@ export PKG_CONFIG_PATH := $(DAV1D)/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_C
 export SYSTEM_DEPS_DAV1D_LINK := static
 
 .PHONY: help run build test clippy clean \
-	test-live install-desktop uninstall-desktop refresh-desktop-caches \
+	test-live install-desktop uninstall-desktop refresh-desktop-caches cat-ginger \
 	run-spike run-spike-break build-spike test-spike clean-spike \
 	deps check-tools clean-deps
 
@@ -60,6 +60,7 @@ help:
 	@echo "make clean            remove catnap's build output"
 	@echo "make install-desktop  desktop entry + icon in ~/.local/share, so docks show catnap's icon"
 	@echo "make uninstall-desktop  remove them"
+	@echo "make cat-ginger       rebuild the ginger cat's clips from its footage (uv, ffmpeg)"
 	@echo ""
 	@echo "make run-spike        build and launch the AV1 video spike (1280x720 window)"
 	@echo "make run-spike-break  same, fullscreen and see-through: the cat over the desktop"
@@ -118,6 +119,22 @@ refresh-desktop-caches:
 		gtk-update-icon-cache -q -t -f $(DATA_HOME)/icons/hicolor; fi
 	@if command -v update-desktop-database >/dev/null; then \
 		update-desktop-database -q $(DATA_HOME)/applications; fi
+
+# ---- cat footage (dev machine only) -----------------------------------------
+
+# The ginger cat, from AI footage (assets/cats/ginger/prompt.txt). The source
+# stays local, in the gitignored dev-assets/. The times were measured on it:
+# the entry starts where the rest of the walk covers one screen width (the
+# slide in ui/cat.slint), and the loop is the sleep window whose 2 s seam
+# blend differs least.
+GINGER_SRC ?= dev-assets/seedance/cgt-20260915035359-6c5p8.mp4
+GINGER_CUT := dev-assets/derived/ginger
+
+cat-ginger:
+	uv run tools/cutout.py $(GINGER_SRC) $(GINGER_CUT) --entry-start 1.583 --loop-start 19.25 --loop-end 28.583
+	mkdir -p assets/cats/ginger
+	tools/encode.sh $(GINGER_CUT)/entry.mkv assets/cats/ginger/entry.ivf 24
+	tools/encode.sh $(GINGER_CUT)/sleep.mkv assets/cats/ginger/sleep.ivf 12
 
 # ---- AV1 video spike --------------------------------------------------------
 

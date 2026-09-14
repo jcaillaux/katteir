@@ -23,16 +23,24 @@ export component CatWindow inherits Window {
     callback hold-pressed();
     callback hold-released();
 
+    // The clip keeps its shape (16:9 until its first frame): as big as the
+    // screen allows, at the bottom right. It slides in by its own width, so
+    // a cat cut off by the clip's right edge comes in from off-screen.
+    property <float> clip-aspect: root.frame.height > 0 ? (root.frame.width * 1.0) / root.frame.height : 16.0 / 9.0;
+
     Image {
-        x: root.arrived ? 0px : root.width;
-        y: 0px;
-        width: root.width;
-        height: root.height;
+        width: min(root.width, root.height * root.clip-aspect);
+        height: self.width / root.clip-aspect;
+        x: root.arrived ? root.width - self.width : root.width;
+        y: root.height - self.height;
         source: root.frame;
         image-fit: contain;
+        // Timed to the ginger cat's walk (CLAUDE.md §5): its footage follows
+        // the cat, so this slide is the walk. Walking speed first, slowing as
+        // the cat stops; the paws stay put within 25 px on a 1920 px screen.
         animate x {
-            duration: 3s;
-            easing: ease-out;
+            duration: 2.6s;
+            easing: cubic-bezier(0.60, 0.70, 0.75, 0.90);
         }
     }
 

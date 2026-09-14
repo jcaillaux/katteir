@@ -33,7 +33,8 @@ fully before touching code. When in doubt, ask; do not guess.
   - Clips are cut-out cats **with alpha**, stored as "stacked alpha" video
     (see §5), drawn straight over the desktop: the cat window is always a
     see-through overlay (§5).
-  - Poking the sleeping cat plays a short "stir" animation.
+  - Poking the sleeping cat plays a short "stir" animation. Not planned for
+    now (set aside on 2026-09-14).
   - A break lasts a set time (`break_secs`) and ends by itself. A countdown
     badge (big white digits on an `rgba(0,0,0,0.6)` rounded box) shows the
     time left, and a press-and-hold button ends the break early at any time.
@@ -114,10 +115,12 @@ catnap/
 │   ├── cats/<name>/entry.ivf, sleep.ivf, stir.ivf
 │   ├── cats/<name>/cat.toml   # fps, frame counts, size, credits, licence
 │   ├── cats/placeholder/    # the bundled cat (CC0, embedded with include_bytes!)
+│   ├── cats/ginger/         # the real cat: AI footage cut out (CC0), prompt.txt; make cat-ginger
 │   ├── catnap.desktop       # desktop entry; make install-desktop fills in Exec
 │   └── icons/catnap-tray.svg  # the icon (CC0): tray ($XDG_RUNTIME_DIR/catnap/) and desktop entry
 │       └── catnap-tray-<px>.argb  # the same at 16/22/32/48 px, rendered by tools/icons.sh
 ├── tools/
+│   ├── cutout.py            # numpy via uv: footage on a plain backdrop → entry + blended loop with alpha (dev-time only)
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
 │   ├── placeholder.sh       # ffmpeg: draws the placeholder cat, no footage (dev-time only)
 │   └── icons.sh             # ffmpeg + librsvg: the icon SVG → raw ARGB pixels (dev-time only)
@@ -218,9 +221,21 @@ dismiss_hold_secs = 5     # 1..=30, hold time to end a break early
 ### Cat window (`overlay.rs`, `ui/cat.slint`)
 Always an overlay (decided 2026-09-14; the opaque fullscreen mode was
 dropped): fullscreen, `no-frame`, `background: transparent` and
-`always-on-top`, so the cat is drawn over the desktop. The clip slides in from
-the right (3 s), a countdown badge sits top right, and the hold-to-dismiss
-pill sits bottom centre.
+`always-on-top`, so the cat is drawn over the desktop. The clip keeps its
+shape, as big as the screen allows, at the bottom right, and slides in from
+the right by its own width. A countdown badge sits top right, and the
+hold-to-dismiss pill sits bottom centre.
+- **The slide is the walk.** The ginger cat's footage follows the cat as it
+  walks (a tracking shot on a plain backdrop), so once cut out the cat walks
+  on the spot, and the slide moves it. Measured on the planted paws: it
+  walks 22 px per frame of 1280 (0.41 clip widths a second), then slows and
+  stops at 4.3 s. So the entry starts at 1.58 s, where the rest of the walk
+  covers exactly one clip width, and the slide takes 2.6 s with
+  `cubic-bezier(0.60, 0.70, 0.75, 0.90)`, which follows the paws to within
+  25 px on a 1920 px screen (the former 3 s ease-out was off by 219 px).
+  The cat is cut off by the clip's right edge while it walks; sliding by the
+  clip's width, not the screen's, keeps that edge off-screen on every
+  aspect ratio. Timing per cat comes with a second cat.
 - Transparency works with femtovg on Wayland (Budgie 10.10 on labwc) and on
   X11 via XWayland: premultiplied output, checked by GL readback in
   `spikes/av1-video`. Borderless fullscreen works on both (checked).
@@ -282,13 +297,27 @@ pill sits bottom centre.
 
 ### Cat sets (`cats.rs`, `video/`)
 - Each cat: `entry` (non-looping), `sleep` (looping), optional `stir`
-  (non-looping, plays on click then returns to `sleep`). One IVF file each.
+  (non-looping, would play on click then return to `sleep`; not planned for
+  now). One IVF file each.
 - Clip format: AV1, 8-bit 4:2:0, BT.709 limited range, **stacked alpha**. The
   frame height is 2 × the picture height: the top half is colour, and the
   bottom half's luma is alpha (limited range, 16–235). Pictures are 720p
-  (frames 1280×1440), 30 fps for `entry`, 15 fps for `sleep`. 1080p drops
-  frames on a 15 W laptop (see the spike README).
+  (frames 1280×1440). `entry` plays at the footage's own rate and `sleep`
+  at half of it: 24 and 12 fps for the ginger cat, as AI video is 24 fps
+  and no frames are invented to reach 30. 1080p drops frames on a 15 W
+  laptop (see the spike README).
   The bundled placeholder is smaller: 640×360 pictures at 15 fps.
+- **The ginger cat** (`assets/cats/ginger/`, 2.5 MB): 30 s of AI footage
+  (§7) made into a 17.7 s entry (424 frames) and a 9.3 s loop (112). The
+  cut-out is a colour key, red minus blue: the blue-grey backdrop is below
+  zero and ginger fur far above it, so no matting model is needed. Soft
+  edges lose the backdrop's tint (a smooth fit of the frame's own backdrop).
+  AI footage never comes back to the same frame (the fur keeps changing
+  slowly), so a plain cut loop would jump: the loop's last 2 s are blended
+  into the frames just before its start, and its window (19.25 to 28.58 s)
+  is where that blend differs least. The contact shadow is lost. For now
+  it's played through the settings window's clip fields; the placeholder
+  is still the bundled default.
 - `cat.toml`: `fps`, per-clip `frames`, `width`, `height`, `credits`,
   `license`. For now it only records credits and licence: `cats.rs` checks
   the two IVF headers against each other (same size, one rate a multiple of
@@ -429,11 +458,24 @@ with `libvpx-vp9`, because ffmpeg's built-in VP9 decoder drops alpha:
 tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 720p, crf 38
 ```
 
+Cut a cat out of footage on a plain backdrop (dev machine only; uv and
+ffmpeg with FFV1). The script declares numpy inline, so uv fetches it into
+its own cache: no venv to keep. `make cat-ginger` runs this and the two
+encodes with the ginger cat's measured times:
+```sh
+uv run tools/cutout.py src.mp4 dev-assets/derived/<name> --entry-start S --loop-start S --loop-end S
+```
+
 ## 7. Assets policy
 
 - Every cat under `assets/cats/` must have a `cat.toml` with `license` and
   `credits`. Only ship assets we own or that are CC0/CC-BY with attribution
   recorded there. AI-generated clips we produce ourselves are fine.
+- The ginger cat was generated on 2026-09-14 with ByteDance Seedance 2.5 on
+  easemate.ai, text to video (`assets/cats/ginger/prompt.txt`), no
+  reference image. EaseMate's terms (updated 2025-06-24) leave generated
+  content with the user who made it; we release the clips as CC0. The 30 s
+  source stays local in `dev-assets/seedance/`.
 - `assets/icons/` holds icons drawn for catnap, CC0; each file says so.
 - Nothing from zokuzoku's repos is ever committed, embedded or shipped. No
   "neko", "gatekeeper", or their icon style in names or visuals.
@@ -460,7 +502,8 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
    (done, both on our own D-Bus client, checked on Budgie/labwc). Still to
    verify on KDE, Sway, and GNOME, which shows no tray without the
    AppIndicator extension. Then macOS and Windows, with `tray-icon`.
-4. **M3 — polish**: stir on click, real assets, one cat per screen
+4. **M3 — polish**: real assets (the ginger cat, from AI footage: done; not
+   yet the bundled default), one cat per screen
    ("multiple cats" means across monitors, not a cat registry; done on
    layer-shell compositors, X11/GNOME still get one window), and starting
    at login as a setting the user turns on (never on by default; done). Dropped on
@@ -468,7 +511,8 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
    settings window (the current one is compact enough).
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary > 7 MB).
-6. **Later / optional**: per-app triggers, stats, and a no-OpenGL
+6. **Later / optional**: per-app triggers, stats, stir on click (set aside
+   on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).
    Windows and macOS, deferred the same day: Linux first. The Rust unwind
    tables (`.eh_frame`, about 0.6 MB) are kept for now, also that day, so
