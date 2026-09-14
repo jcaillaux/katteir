@@ -23,8 +23,10 @@ fully before touching code. When in doubt, ask; do not guess.
   is 5.2 MB even with `patches/` applied, and dav1d plus the video code is
   ~1.3 MB (see `spikes/slint-size/`). M1 was 7.20 MB until zbus was patched
   out of Slint (`patches/README.md`), then 6.32 MB; with M2's notifications,
-  tray and layer-shell cat window it's 6.52 MB. If a dependency adds
-  megabytes, justify it in this file or drop it.
+  tray and layer-shell cat window it's 6.52 MB. The bundled cat's clips
+  are embedded too (2.47 MB, §5) and don't count against the budget: on
+  2026-09-14 the binary was 9.02 MB with them, 6.55 MB without. If a
+  dependency adds megabytes, justify it in this file or drop it.
 - Behaviour to match (observed from the original extension):
   - Cat sequence = one **entry** clip (the reference clip is ~11 s: the cat
     walks in, turns and lies down) followed by a looping **sleep** clip.
@@ -91,7 +93,7 @@ catnap/
 │   ├── timer.rs             # work/break state machine (pure, no UI, no I/O)
 │   ├── hold.rs              # press-and-hold state machine (pure, tested)
 │   ├── autostart.rs         # start at login: the XDG autostart entry (a setting, off by default)
-│   ├── cats.rs              # which clips play: the bundled placeholder or the configured pair
+│   ├── cats.rs              # which clips play: the bundled ginger cat or the configured pair
 │   ├── platform/
 │   │   ├── mod.rs           # Platform: what differs by OS (notifications, tray)
 │   │   ├── backend.rs       # catnap's Slint platform: winit for all, layer-shell for the cat
@@ -114,15 +116,13 @@ catnap/
 ├── assets/
 │   ├── cats/<name>/entry.ivf, sleep.ivf, stir.ivf
 │   ├── cats/<name>/cat.toml   # fps, frame counts, size, credits, licence
-│   ├── cats/placeholder/    # the bundled cat (CC0, embedded with include_bytes!)
-│   ├── cats/ginger/         # the real cat: AI footage cut out (CC0), prompt.txt; make cat-ginger
+│   ├── cats/ginger/         # the bundled cat (CC0, embedded with include_bytes!): AI footage, prompt.txt
 │   ├── catnap.desktop       # desktop entry; make install-desktop fills in Exec
 │   └── icons/catnap-tray.svg  # the icon (CC0): tray ($XDG_RUNTIME_DIR/catnap/) and desktop entry
 │       └── catnap-tray-<px>.argb  # the same at 16/22/32/48 px, rendered by tools/icons.sh
 ├── tools/
 │   ├── cutout.py            # numpy via uv: footage on a plain backdrop → entry + blended loop with alpha (dev-time only)
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
-│   ├── placeholder.sh       # ffmpeg: draws the placeholder cat, no footage (dev-time only)
 │   └── icons.sh             # ffmpeg + librsvg: the icon SVG → raw ARGB pixels (dev-time only)
 ├── patches/                 # Cargo.toml-patched Slint crates (see patches/README.md)
 ├── spikes/                  # throwaway experiments, each with a README of results
@@ -197,7 +197,7 @@ warn_before_secs = 60     # 0..=300, 0 = no warning
 break_secs = 300          # 10..=3600, how long the cat stays
 
 [cat]
-name = "placeholder"      # bundled cat, assets/cats/<name>
+name = "ginger"           # bundled cat, assets/cats/<name> (there's only one so far)
 entry_clip = "/abs/path/entry.ivf"   # optional; both clips set = they replace the bundled cat
 loop_clip  = "/abs/path/loop.ivf"
 
@@ -306,7 +306,6 @@ hold-to-dismiss pill sits bottom centre.
   at half of it: 24 and 12 fps for the ginger cat, as AI video is 24 fps
   and no frames are invented to reach 30. 1080p drops frames on a 15 W
   laptop (see the spike README).
-  The bundled placeholder is smaller: 640×360 pictures at 15 fps.
 - **The ginger cat** (`assets/cats/ginger/`, 2.5 MB): 30 s of AI footage
   (§7) made into a 17.7 s entry (424 frames) and a 9.3 s loop (112). The
   cut-out is a colour key, red minus blue: the blue-grey backdrop is below
@@ -315,9 +314,9 @@ hold-to-dismiss pill sits bottom centre.
   AI footage never comes back to the same frame (the fur keeps changing
   slowly), so a plain cut loop would jump: the loop's last 2 s are blended
   into the frames just before its start, and its window (19.25 to 28.58 s)
-  is where that blend differs least. The contact shadow is lost. For now
-  it's played through the settings window's clip fields; the placeholder
-  is still the bundled default.
+  is where that blend differs least. The contact shadow is lost. It's the
+  bundled cat, embedded with `include_bytes!`. It replaced M1's
+  placeholder, a flat blob drawn by ffmpeg, on 2026-09-14.
 - `cat.toml`: `fps`, per-clip `frames`, `width`, `height`, `credits`,
   `license`. For now it only records credits and licence: `cats.rs` checks
   the two IVF headers against each other (same size, one rate a multiple of
@@ -502,15 +501,16 @@ uv run tools/cutout.py src.mp4 dev-assets/derived/<name> --entry-start S --loop-
    (done, both on our own D-Bus client, checked on Budgie/labwc). Still to
    verify on KDE, Sway, and GNOME, which shows no tray without the
    AppIndicator extension. Then macOS and Windows, with `tray-icon`.
-4. **M3 — polish**: real assets (the ginger cat, from AI footage: done; not
-   yet the bundled default), one cat per screen
+4. **M3 — polish**: real assets (done: the ginger cat, from AI footage, is
+   the bundled cat), one cat per screen
    ("multiple cats" means across monitors, not a cat registry; done on
    layer-shell compositors, X11/GNOME still get one window), and starting
    at login as a setting the user turns on (never on by default; done). Dropped on
    2026-09-14: the entry→loop cross-fade (not needed) and the more compact
    settings window (the current one is compact enough).
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
-   size budget check in CI (fail if the stripped binary > 7 MB).
+   size budget check in CI (fail if the stripped binary, less the embedded
+   cat's clips, is over 7 MB).
 6. **Later / optional**: per-app triggers, stats, stir on click (set aside
    on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).

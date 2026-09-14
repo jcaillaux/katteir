@@ -378,7 +378,7 @@ impl Ctx {
         };
         match overlay.show(&clips, Duration::from_secs(u64::from(hold_secs))) {
             Ok(()) if problem.is_empty() => ("Break time!".to_owned(), false),
-            Ok(()) => (format!("Break time! Showing the placeholder cat: {problem}"), true),
+            Ok(()) => (format!("Break time! Showing the bundled cat: {problem}"), true),
             Err(error) => {
                 log::error!("{error}");
                 (format!("Break time! The cat window failed: {error}"), true)
@@ -387,7 +387,7 @@ impl Ctx {
     }
 
     /// The cat for this break: the configured clips when usable, else the
-    /// placeholder. Returns why the configured clips weren't used, if they
+    /// bundled cat. Returns why the configured clips weren't used, if they
     /// were set. Only the configured clips are cached, so a clip on a drive
     /// that gets mounted later is picked up at the next break.
     fn cat_clips(&self) -> (Option<CatClips>, String) {
@@ -401,15 +401,15 @@ impl Ctx {
                 return (Some(clips), String::new());
             }
             Some(Err(error)) => {
-                log::warn!("the configured clips can't be used ({error}); showing the placeholder");
+                log::warn!("the configured clips can't be used ({error}); showing the bundled cat");
                 error.to_string()
             }
             None => String::new(),
         };
-        match cats::placeholder() {
+        match cats::bundled() {
             Ok(clips) => (Some(clips), problem),
             Err(error) => {
-                log::error!("the placeholder cat is broken: {error}");
+                log::error!("the bundled cat is broken: {error}");
                 (None, error.to_string())
             }
         }

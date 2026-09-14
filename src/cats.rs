@@ -1,13 +1,13 @@
-//! Cat sources (CLAUDE.md §5). M1 has the bundled placeholder plus the clips
-//! from the config; the registry of bundled cats comes with M3.
+//! Cat sources (CLAUDE.md §5): the bundled ginger cat, or the clips from the
+//! config.
 
 use crate::config::Config;
 use crate::video::{Clip, ClipError, decode};
 
-/// The bundled placeholder: a flat ginger blob made by tools/placeholder.sh
-/// (CC0, see assets/cats/placeholder/cat.toml).
-const PLACEHOLDER_ENTRY: &[u8] = include_bytes!("../assets/cats/placeholder/entry.ivf");
-const PLACEHOLDER_SLEEP: &[u8] = include_bytes!("../assets/cats/placeholder/sleep.ivf");
+/// The bundled cat: AI footage cut out by tools/cutout.py (CC0, see
+/// assets/cats/ginger/cat.toml).
+const BUNDLED_ENTRY: &[u8] = include_bytes!("../assets/cats/ginger/entry.ivf");
+const BUNDLED_SLEEP: &[u8] = include_bytes!("../assets/cats/ginger/sleep.ivf");
 
 /// The two clips of one break: the entry once, then the loop.
 #[derive(Clone)]
@@ -26,9 +26,9 @@ pub enum CatError {
     RateMismatch { entry: u32, looped: u32 },
 }
 
-pub fn placeholder() -> Result<CatClips, CatError> {
-    let entry = Clip::from_static(PLACEHOLDER_ENTRY).map_err(|source| CatError::Clip { which: "placeholder entry", source })?;
-    let looped = Clip::from_static(PLACEHOLDER_SLEEP).map_err(|source| CatError::Clip { which: "placeholder sleep", source })?;
+pub fn bundled() -> Result<CatClips, CatError> {
+    let entry = Clip::from_static(BUNDLED_ENTRY).map_err(|source| CatError::Clip { which: "bundled entry", source })?;
+    let looped = Clip::from_static(BUNDLED_SLEEP).map_err(|source| CatError::Clip { which: "bundled sleep", source })?;
     pair(entry, looped)
 }
 
@@ -83,17 +83,8 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_is_a_valid_pair() {
-        let clips = placeholder().expect("the embedded placeholder is valid");
-        assert_eq!(clips.entry.stacked_size_px(), (640, 720));
-        assert_eq!((clips.entry.fps(), clips.looped.fps()), (15, 15));
-        assert_eq!((clips.entry.frame_count(), clips.looped.frame_count()), (30, 60));
-    }
-
-    #[test]
-    fn the_ginger_cat_is_a_valid_pair() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/cats/ginger");
-        let clips = load_pair(&dir.join("entry.ivf"), &dir.join("sleep.ivf")).expect("the ginger cat's clips pair up");
+    fn the_bundled_cat_is_a_valid_pair() {
+        let clips = bundled().expect("the embedded ginger cat is valid");
         assert_eq!(clips.entry.stacked_size_px(), (1280, 1440));
         assert_eq!((clips.entry.fps(), clips.looped.fps()), (24, 12));
         assert_eq!((clips.entry.frame_count(), clips.looped.frame_count()), (424, 112));

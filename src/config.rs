@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::limits;
 
 /// The bundled cat used when no clips are configured.
-pub const DEFAULT_CAT: &str = "placeholder";
+pub const DEFAULT_CAT: &str = "ginger";
 
 const HEADER: &str = "# catnap configuration. Edit freely: values out of range are clamped when\n\
                       # catnap loads this file. Clip paths must be absolute.\n\n";
