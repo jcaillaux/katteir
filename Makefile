@@ -47,7 +47,8 @@ export PKG_CONFIG_PATH := $(DAV1D)/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_C
 export SYSTEM_DEPS_DAV1D_LINK := static
 
 .PHONY: help run build test clippy clean \
-	test-live run-spike run-spike-break build-spike test-spike clean-spike \
+	test-live install-desktop uninstall-desktop refresh-desktop-caches \
+	run-spike run-spike-break build-spike test-spike clean-spike \
 	deps check-tools clean-deps
 
 help:
@@ -57,6 +58,8 @@ help:
 	@echo "make test-live        tests against the real session bus (shows nothing)"
 	@echo "make clippy           clippy on catnap, warnings as errors"
 	@echo "make clean            remove catnap's build output"
+	@echo "make install-desktop  desktop entry + icon in ~/.local/share, so docks show catnap's icon"
+	@echo "make uninstall-desktop  remove them"
 	@echo ""
 	@echo "make run-spike        build and launch the AV1 video spike (1280x720 window)"
 	@echo "make run-spike-break  same, fullscreen and see-through: the cat over the desktop"
@@ -88,6 +91,33 @@ clippy: check-tools $(DAV1D_LIB)
 
 clean:
 	cargo clean
+
+# Docks and app menus find catnap's icon through a desktop entry named after
+# its app id (catnap). This installs one for this checkout, in your home
+# only; release packages will install it properly (M4).
+DATA_HOME    := $(or $(XDG_DATA_HOME),$(HOME)/.local/share)
+DESKTOP_FILE := $(DATA_HOME)/applications/catnap.desktop
+ICON_FILE    := $(DATA_HOME)/icons/hicolor/scalable/apps/catnap.svg
+
+install-desktop: build
+	install -Dm644 assets/icons/catnap-tray.svg $(ICON_FILE)
+	mkdir -p $(dir $(DESKTOP_FILE))
+	sed 's|^Exec=.*|Exec=$(CURDIR)/$(BIN)|' assets/catnap.desktop > $(DESKTOP_FILE)
+	$(MAKE) --no-print-directory refresh-desktop-caches
+	@echo "Installed $(DESKTOP_FILE) and $(ICON_FILE)."
+	@echo "A dock that was already running (Crystal Dock, Plank...) may need a restart to show the icon."
+
+uninstall-desktop:
+	rm -f $(DESKTOP_FILE) $(ICON_FILE)
+	$(MAKE) --no-print-directory refresh-desktop-caches
+
+# An icon cache that predates the icon hides it from GTK, so rebuild it (and
+# the desktop database) when the tools exist; both are optional.
+refresh-desktop-caches:
+	@if command -v gtk-update-icon-cache >/dev/null; then \
+		gtk-update-icon-cache -q -t -f $(DATA_HOME)/icons/hicolor; fi
+	@if command -v update-desktop-database >/dev/null; then \
+		update-desktop-database -q $(DATA_HOME)/applications; fi
 
 # ---- AV1 video spike --------------------------------------------------------
 

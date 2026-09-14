@@ -50,6 +50,8 @@ export component SettingsWindow inherits Window {
     // Warnings (adjusted values, unusable clips, a failed save) show in red.
     in property <bool> notice-is-warning;
     in property <string> config-path;
+    // A tray icon is showing: closing this window keeps catnap running.
+    in property <bool> tray-available;
 
     callback start();
     callback pause();
@@ -182,6 +184,13 @@ export component SettingsWindow inherits Window {
 
         Text {
             text: "Config file: " + root.config-path;
+            color: Theme.text-muted;
+            font-size: Theme.font-size-small;
+            wrap: word-wrap;
+        }
+
+        if root.tray-available: Text {
+            text: "Closing this window keeps catnap running in the tray.";
             color: Theme.text-muted;
             font-size: Theme.font-size-small;
             wrap: word-wrap;

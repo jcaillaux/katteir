@@ -23,7 +23,7 @@ fully before touching code. When in doubt, ask; do not guess.
   is 5.2 MB even with `patches/` applied, and dav1d plus the video code is
   ~1.3 MB (see `spikes/slint-size/`). M1 was 7.20 MB until zbus was patched
   out of Slint (`patches/README.md`), then 6.32 MB; with M2's notifications
-  it's 6.36 MB. If a dependency adds
+  and tray it's 6.41 MB. If a dependency adds
   megabytes, justify it in this file or drop it.
 - Behaviour to match (observed from the original extension):
   - Cat sequence = one **entry** clip (the reference clip is ~11 s: the cat
@@ -49,7 +49,7 @@ fully before touching code. When in doubt, ask; do not guess.
 | GL calls | `glow` | Raw GL for the video shader, only in `src/video/`. ~33 KiB. |
 | Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top` | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland (§5). |
 | Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |
-| Tray | Linux: our own StatusNotifierItem + dbusmenu on the D-Bus client below (next M2 step). macOS/Windows: `tray-icon` | Not `ksni`: it and `notify-rust` need zbus, measured on 2026-09-14 at +1.21 MB and 58 crates (catnap 6.32 → 7.53 MB). Do NOT enable `tray-icon`'s Linux backends (GTK/libappindicator, or `ksni`). |
+| Tray | Linux: our own StatusNotifierItem + dbusmenu on the D-Bus client below (+54 KB). macOS/Windows: `tray-icon` | Not `ksni`: it and `notify-rust` need zbus, measured on 2026-09-14 at +1.21 MB and 58 crates (catnap 6.32 → 7.53 MB). Do NOT enable `tray-icon`'s Linux backends (GTK/libappindicator, or `ksni`). |
 | Notifications | Linux: `org.freedesktop.Notifications` through our own blocking D-Bus client, `src/platform/linux/` (+35 KB, no dependencies). macOS/Windows: decided in M2 | Not `notify-rust` (zbus, see Tray). |
 | Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/catnap/config.toml` etc. (schema in §5). With logging, errors and our own code, M0 is 5.84 MB stripped against 5.19 MB for Slint alone, so ~0.65 MB. |
 | Logging | `log` + `env_logger` | `env_logger` with default features off: no regex, no `jiff` timestamps, no colour. `RUST_LOG` still filters. |
@@ -90,11 +90,14 @@ catnap/
 │   ├── hold.rs              # press-and-hold state machine (pure, tested)
 │   ├── cats.rs              # which clips play: the bundled placeholder or the configured pair
 │   ├── platform/
-│   │   ├── mod.rs           # Platform: what differs by OS (notifications; the tray next)
+│   │   ├── mod.rs           # Platform: what differs by OS (notifications, tray)
 │   │   ├── linux/
 │   │   │   ├── wire.rs      # D-Bus wire format (pure, tested)
-│   │   │   ├── bus.rs       # blocking session-bus connection: auth, Hello, calls
-│   │   │   └── notify.rs    # org.freedesktop.Notifications on a worker thread
+│   │   │   ├── bus.rs       # blocking session-bus connection: auth, Hello, calls, split
+│   │   │   ├── notify.rs    # org.freedesktop.Notifications on a worker thread
+│   │   │   ├── instance.rs  # one catnap per session: owns catnap.Instance, or asks it to Show
+│   │   │   ├── menu.rs      # the tray menu over com.canonical.dbusmenu (pure, tested)
+│   │   │   └── tray.rs      # StatusNotifierItem: registration, calls, state updates
 │   │   ├── macos.rs
 │   │   └── windows.rs
 │   ├── video/
@@ -107,7 +110,8 @@ catnap/
 │   ├── cats/<name>/entry.ivf, sleep.ivf, stir.ivf
 │   ├── cats/<name>/cat.toml   # fps, frame counts, size, credits, licence
 │   ├── cats/placeholder/    # the bundled cat (CC0, embedded with include_bytes!)
-│   └── icons/
+│   ├── catnap.desktop       # desktop entry; make install-desktop fills in Exec
+│   └── icons/catnap-tray.svg  # the icon (CC0): tray ($XDG_RUNTIME_DIR/catnap/) and desktop entry
 ├── tools/
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
 │   └── placeholder.sh       # ffmpeg: draws the placeholder cat, no footage (dev-time only)
@@ -244,9 +248,10 @@ pill sits bottom centre.
 ### Platform (`platform/mod.rs`)
 One `Platform` struct whose fields and method bodies are picked per OS with
 `#[cfg]`. It isn't a trait, because a build only ever has one
-implementation. Done: `start()` and `notify(summary, body)`, which never
-blocks and only logs failures. Still to come in M2: the tray, and raising
-the cat window's level on macOS (`NSWindow.level`, a no-op elsewhere).
+implementation. Done: `start(on_tray_action)`, `notify(summary, body)`
+(never blocks; failures are only logged), `tray_available()` and
+`set_tray_state()`. Still to come in M2: raising the cat window's level on
+macOS (`NSWindow.level`, a no-op elsewhere).
 `supports_overlay` is gone with the overlay-only cat window. Only these
 things may differ by OS; everything else is shared.
 - **Linux D-Bus client:**
@@ -259,6 +264,41 @@ things may differ by OS; everything else is shared.
     notification server without showing anything.
 - Each notification replaces catnap's previous one (`replaces_id`), so
   warnings don't pile up. Checked on Budgie Notification Server 10.10.2.
+- **Linux tray:**
+  - A `StatusNotifierItem` registered with `org.kde.StatusNotifierWatcher`
+    as `org.kde.StatusNotifierItem-<pid>-1`. It registers again whenever the
+    watcher's owner changes, for example when the panel restarts.
+  - The icon is `assets/icons/catnap-tray.svg`, written to
+    `$XDG_RUNTIME_DIR/catnap/` and named through `IconName` +
+    `IconThemePath`, not sent as `IconPixmap`. The ayatana watcher on Budgie
+    and Ubuntu ignores pixmaps (the string isn't in its binary), and
+    Chromium's tray icons, Discord's for example, work the same way. The 15
+    properties copy Chromium's.
+  - Menu (`com.canonical.dbusmenu` at `/MenuBar`): a status line in whole
+    minutes (so at most one update a minute), Start/Pause/Stop, Settings…,
+    Quit catnap. On ayatana a left click opens the menu; hosts that send
+    `Activate` (KDE) show the settings window instead.
+  - Two threads: a reader blocked on the socket, and the tray thread, which
+    handles bus messages and state updates from one bounded queue. Menu
+    choices reach the UI through `slint::Weak::upgrade_in_event_loop`.
+  - While the tray is up, closing the settings window keeps catnap running
+    (`run_event_loop_until_quit`, ended by Quit). Without a tray, closing it
+    quits as before.
+- **One catnap per session:** at startup, `Platform::start` claims the bus
+  name `catnap.Instance`. If it's taken, it calls `Show` on the owner (which
+  opens its settings window) and returns `None`, and main exits. The owner's
+  connection becomes the tray's, so the tray thread answers `Show`. Without
+  a session bus there's no check.
+- **Dock icon:** docks find a window's icon through its app id (Wayland) or
+  class (X11) and a desktop entry of that name, not through the tray. main
+  sets the app id to `catnap` (`slint::set_xdg_app_id`, before any window is
+  shown), and `make install-desktop` installs `catnap.desktop` and the icon
+  under `~/.local/share` for a dev checkout, then rebuilds the user icon
+  cache and desktop database. Without them, the dock shows a blank disk. On
+  the dev machine the bottom dock is Crystal Dock 2.16, a separate program
+  from `budgie-panel`. A dock that was already running before the first
+  install needs a restart to see the new entry. labwc's window switcher
+  looks the icon up fresh each time.
 
 ## 6. Build & run
 
@@ -266,6 +306,7 @@ things may differ by OS; everything else is shared.
 make run                                   # build and launch catnap (make help lists all targets)
 make test && make clippy                   # catnap tests; clippy with warnings as errors
 make test-live                             # the ignored tests: real session bus + notification server
+make install-desktop                       # desktop entry + icon in ~/.local/share (dock icon); make uninstall-desktop
 make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
 make run-spike-break                       # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
@@ -302,6 +343,7 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
 - Every cat under `assets/cats/` must have a `cat.toml` with `license` and
   `credits`. Only ship assets we own or that are CC0/CC-BY with attribution
   recorded there. AI-generated clips we produce ourselves are fine.
+- `assets/icons/` holds icons drawn for catnap, CC0; each file says so.
 - Nothing from zokuzoku's repos is ever committed, embedded or shipped. No
   "neko", "gatekeeper", or their icon style in names or visuals.
 - **One exception, local testing only:** the two original clips
@@ -323,9 +365,9 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
    `spikes/av1-video/`, a bundled placeholder cat, slide-in, sleep loop,
    press-and-hold dismiss, and a timed break with a countdown badge (which
    replaced `min_break_secs`).
-3. **M2 — platform layer** (in progress): Linux notifications (done) and
-   tray (next), both on our own D-Bus client. Verify on Budgie/labwc (the dev
-   machine), then KDE, Sway, and GNOME, which shows no tray without the
+3. **M2 — platform layer** (in progress): Linux notifications and tray
+   (done, both on our own D-Bus client, checked on Budgie/labwc). Still to
+   verify on KDE, Sway, and GNOME, which shows no tray without the
    AppIndicator extension. Then macOS and Windows, with `tray-icon`.
 4. **M3 — polish**: cross-fade, stir on click, multiple cats, real assets,
    autostart option. Also a more compact settings window, **deferred** on

@@ -122,6 +122,41 @@ impl<'a> Header<'a> {
         }
     }
 
+    /// The reply to a method call, sent back to its sender.
+    pub fn method_return(reply_serial: u32, destination: Option<&'a str>, signature: &'a str) -> Self {
+        Self {
+            kind: Kind::MethodReturn,
+            flags: 0,
+            path: None,
+            interface: None,
+            member: None,
+            error_name: None,
+            reply_serial: Some(reply_serial),
+            destination,
+            signature,
+        }
+    }
+
+    /// An error reply to a method call. Its body is one string: the message.
+    pub fn error(reply_serial: u32, destination: Option<&'a str>, error_name: &'a str) -> Self {
+        Self { kind: Kind::Error, error_name: Some(error_name), signature: "s", ..Self::method_return(reply_serial, destination, "") }
+    }
+
+    /// A signal to whoever listens.
+    pub fn signal(path: &'a str, interface: &'a str, member: &'a str, signature: &'a str) -> Self {
+        Self {
+            kind: Kind::Signal,
+            flags: 0,
+            path: Some(path),
+            interface: Some(interface),
+            member: Some(member),
+            error_name: None,
+            reply_serial: None,
+            destination: None,
+            signature,
+        }
+    }
+
     fn has(&self, code: u8) -> bool {
         match code {
             FIELD_PATH => self.path.is_some(),
@@ -245,6 +280,10 @@ impl Writer {
         self.buf.push(value);
     }
 
+    pub fn bool(&mut self, value: bool) {
+        self.u32(u32::from(value));
+    }
+
     pub fn i32(&mut self, value: i32) {
         self.pad(4);
         self.buf.extend_from_slice(&value.to_le_bytes());
@@ -353,9 +392,17 @@ impl<'a> Reader<'a> {
         Ok(u32::from_le_bytes(self.word()?))
     }
 
-    #[cfg(test)]
     pub fn i32(&mut self) -> Result<i32, WireError> {
         Ok(i32::from_le_bytes(self.word()?))
+    }
+
+    #[cfg(test)]
+    pub fn bool(&mut self) -> Result<bool, WireError> {
+        match self.u32()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(WireError::Malformed("boolean isn't 0 or 1")),
+        }
     }
 
     pub fn str(&mut self) -> Result<&'a str, WireError> {
@@ -558,6 +605,7 @@ struct Fields {
     error_name: Option<Range<usize>>,
     reply_serial: Option<u32>,
     signature: Option<Range<usize>>,
+    sender: Option<Range<usize>>,
     body_at: usize,
 }
 
@@ -596,7 +644,8 @@ fn read_fields(bytes: &[u8]) -> Result<Fields, WireError> {
             FIELD_ERROR_NAME => fields.error_name = Some(reader.text()?.0),
             FIELD_REPLY_SERIAL => fields.reply_serial = Some(reader.u32()?),
             FIELD_SIGNATURE => fields.signature = Some(reader.signature_text()?.0),
-            // Destination, sender, fd count, and codes from later spec versions.
+            FIELD_SENDER => fields.sender = Some(reader.text()?.0),
+            // Destination, fd count, and codes from later spec versions.
             _ => reader.skip(signature)?,
         }
     }
@@ -613,6 +662,8 @@ fn read_fields(bytes: &[u8]) -> Result<Fields, WireError> {
 pub struct Message {
     bytes: Vec<u8>,
     kind: Kind,
+    flags: u8,
+    serial: u32,
     fields: Fields,
 }
 
@@ -626,6 +677,11 @@ impl Message {
             Ordering::Equal => {}
         }
         let kind = Kind::from_code(bytes[1]).ok_or(WireError::Malformed("unknown message type"))?;
+        let flags = bytes[2];
+        let serial = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        if serial == 0 {
+            return Err(WireError::Malformed("serial 0"));
+        }
         let fields = read_fields(&bytes)?;
         if !required_fields(kind).iter().all(|&code| fields.has(code)) {
             return Err(WireError::Malformed("required header field missing"));
@@ -633,11 +689,36 @@ impl Message {
         if fields.signature.is_none() && fields.body_at < bytes.len() {
             return Err(WireError::Malformed("body without a signature"));
         }
-        Ok(Self { bytes, kind, fields })
+        Ok(Self { bytes, kind, flags, serial, fields })
     }
 
     pub fn kind(&self) -> Kind {
         self.kind
+    }
+
+    pub fn flags(&self) -> u8 {
+        self.flags
+    }
+
+    pub fn serial(&self) -> u32 {
+        self.serial
+    }
+
+    /// The sender's unique name; the bus fills it in.
+    pub fn sender(&self) -> Option<&str> {
+        self.text(self.fields.sender.as_ref())
+    }
+
+    pub fn path(&self) -> Option<&str> {
+        self.text(self.fields.path.as_ref())
+    }
+
+    pub fn interface(&self) -> Option<&str> {
+        self.text(self.fields.interface.as_ref())
+    }
+
+    pub fn member(&self) -> Option<&str> {
+        self.text(self.fields.member.as_ref())
     }
 
     pub fn reply_serial(&self) -> Option<u32> {

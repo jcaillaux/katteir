@@ -1,17 +1,20 @@
 //! A blocking connection to the D-Bus session bus over its Unix socket:
-//! finding the address, `EXTERNAL` authentication, `Hello`, and whole
-//! messages in and out. No async runtime and no thread of its own; callers
-//! own the thread. Reads and writes time out after `DBUS_TIMEOUT`.
+//! finding the address, `EXTERNAL` authentication, `Hello`, calls, and
+//! whole messages in and out. No async runtime and no thread of its own.
+//! A connection can be split so one thread blocks reading while another
+//! writes (the tray does this). Writes, and reads before a split, time out
+//! after `DBUS_TIMEOUT`.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
+use std::net::Shutdown;
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::{SocketAddr, UnixStream};
 use std::path::PathBuf;
 
-use super::wire::{self, FIXED_HEADER_BYTES, Header, Kind, Message, WireError};
+use super::wire::{self, FIXED_HEADER_BYTES, Header, Kind, Message, WireError, Writer};
 use crate::limits::{DBUS_TIMEOUT, MAX_DBUS_ADDRESSES, MAX_DBUS_AUTH_LINE_BYTES, MAX_DBUS_MESSAGES_PER_CALL};
 
 const DBUS: &str = "org.freedesktop.DBus";
@@ -31,6 +34,8 @@ pub enum BusError {
     Remote { name: String, message: String },
     #[error("no reply from the session bus")]
     NoReply,
+    #[error("the bus name {0} is already taken")]
+    NameTaken(String),
 }
 
 /// Where a bus listens.
@@ -40,9 +45,21 @@ pub enum Address {
     Abstract(Vec<u8>),
 }
 
+/// A connection used from one thread: calls wait for their replies.
 pub struct Bus {
+    writer: BusWriter,
+}
+
+/// The write half of a split connection. It can't wait for replies: they
+/// arrive on the reader.
+pub struct BusWriter {
     stream: UnixStream,
     last_serial: u32,
+}
+
+/// The read half of a split connection.
+pub struct BusReader {
+    stream: UnixStream,
 }
 
 impl Bus {
@@ -51,7 +68,7 @@ impl Bus {
         let stream = connect(&session_addresses())?;
         stream.set_read_timeout(Some(DBUS_TIMEOUT))?;
         stream.set_write_timeout(Some(DBUS_TIMEOUT))?;
-        let mut bus = Self { stream, last_serial: 0 };
+        let mut bus = Self { writer: BusWriter { stream, last_serial: 0 } };
         bus.authenticate()?;
         let reply = bus.call(&Header::method_call(DBUS, DBUS_PATH, DBUS, "Hello", ""), &[])?;
         let name = reply.body().str()?;
@@ -69,12 +86,12 @@ impl Bus {
         line.extend_from_slice(b"\0AUTH EXTERNAL ");
         line.extend_from_slice(hex(uid.to_string().as_bytes()).as_bytes());
         line.extend_from_slice(b"\r\n");
-        self.stream.write_all(&line)?;
+        self.writer.stream.write_all(&line)?;
         let reply = self.read_auth_line()?;
         if !reply.starts_with("OK ") {
             return Err(BusError::Auth(reply));
         }
-        self.stream.write_all(b"BEGIN\r\n")?;
+        self.writer.stream.write_all(b"BEGIN\r\n")?;
         Ok(())
     }
 
@@ -84,7 +101,7 @@ impl Bus {
         let mut line = Vec::with_capacity(64);
         let mut byte = [0; 1];
         for _ in 0..MAX_DBUS_AUTH_LINE_BYTES {
-            self.stream.read_exact(&mut byte)?;
+            self.writer.stream.read_exact(&mut byte)?;
             if byte[0] == b'\n' && line.last() == Some(&b'\r') {
                 line.pop();
                 return Ok(String::from_utf8_lossy(&line).into_owned());
@@ -94,34 +111,14 @@ impl Bus {
         Err(BusError::Auth("reply line too long".to_owned()))
     }
 
-    /// Sends a message; returns its serial.
-    pub fn send(&mut self, header: &Header<'_>, body: &[u8]) -> Result<u32, BusError> {
-        self.last_serial = self.last_serial.wrapping_add(1).max(1);
-        let bytes = wire::encode(header, self.last_serial, body)?;
-        self.stream.write_all(&bytes)?;
-        Ok(self.last_serial)
-    }
-
-    /// Waits for the next message.
-    pub fn receive(&mut self) -> Result<Message, BusError> {
-        let mut fixed = [0; FIXED_HEADER_BYTES];
-        self.stream.read_exact(&mut fixed)?;
-        let total = wire::message_len(&fixed)?;
-        assert!(total >= FIXED_HEADER_BYTES);
-        let mut bytes = vec![0; total];
-        bytes[..FIXED_HEADER_BYTES].copy_from_slice(&fixed);
-        self.stream.read_exact(&mut bytes[FIXED_HEADER_BYTES..])?;
-        Ok(Message::parse(bytes)?)
-    }
-
     /// Calls a method and waits for its reply. Messages arriving meanwhile
     /// (signals such as `NameAcquired`) are dropped.
     pub fn call(&mut self, header: &Header<'_>, body: &[u8]) -> Result<Message, BusError> {
         assert_eq!(header.kind, Kind::MethodCall);
         assert_eq!(header.flags & wire::NO_REPLY_EXPECTED, 0, "a call without a reply can't be waited for");
-        let serial = self.send(header, body)?;
+        let serial = self.writer.send(header, body)?;
         for _ in 0..MAX_DBUS_MESSAGES_PER_CALL {
-            let message = self.receive()?;
+            let message = read_message(&mut self.writer.stream)?;
             if message.reply_serial() != Some(serial) {
                 continue;
             }
@@ -132,6 +129,83 @@ impl Bus {
         }
         Err(BusError::NoReply)
     }
+
+    /// Asks for a well-known name; fails if another connection has it.
+    pub fn request_name(&mut self, name: &str) -> Result<(), BusError> {
+        const DO_NOT_QUEUE: u32 = 4;
+        const PRIMARY_OWNER: u32 = 1;
+        const ALREADY_OWNER: u32 = 4;
+        let mut body = Writer::with_capacity(64);
+        body.str(name);
+        body.u32(DO_NOT_QUEUE);
+        let reply = self.call(&Header::method_call(DBUS, DBUS_PATH, DBUS, "RequestName", "su"), &body.into_bytes())?;
+        match reply.body().u32()? {
+            PRIMARY_OWNER | ALREADY_OWNER => Ok(()),
+            _ => Err(BusError::NameTaken(name.to_owned())),
+        }
+    }
+
+    /// Subscribes to the signals a match rule describes.
+    pub fn add_match(&mut self, rule: &str) -> Result<(), BusError> {
+        let mut body = Writer::with_capacity(rule.len() + 8);
+        body.str(rule);
+        self.call(&Header::method_call(DBUS, DBUS_PATH, DBUS, "AddMatch", "s"), &body.into_bytes())?;
+        Ok(())
+    }
+
+    /// Splits the connection: one thread blocks reading, another writes.
+    pub fn split(self) -> std::io::Result<(BusWriter, BusReader)> {
+        let reading = self.writer.stream.try_clone()?;
+        // The reader waits as long as it takes; shutting the socket down
+        // (`BusWriter::shutdown`) wakes it.
+        reading.set_read_timeout(None)?;
+        Ok((self.writer, BusReader { stream: reading }))
+    }
+}
+
+impl BusWriter {
+    /// Sends a message; returns its serial.
+    pub fn send(&mut self, header: &Header<'_>, body: &[u8]) -> Result<u32, BusError> {
+        self.last_serial = self.last_serial.wrapping_add(1).max(1);
+        let bytes = wire::encode(header, self.last_serial, body)?;
+        self.stream.write_all(&bytes)?;
+        Ok(self.last_serial)
+    }
+
+    /// Closes the connection, which ends a reader blocked on it.
+    pub fn shutdown(&self) {
+        if let Err(error) = self.stream.shutdown(Shutdown::Both) {
+            log::debug!("session bus shutdown: {error}");
+        }
+    }
+
+    #[cfg(test)]
+    pub fn from_stream(stream: UnixStream) -> Self {
+        Self { stream, last_serial: 0 }
+    }
+}
+
+impl BusReader {
+    /// Waits for the next message.
+    pub fn receive(&mut self) -> Result<Message, BusError> {
+        read_message(&mut self.stream)
+    }
+
+    #[cfg(test)]
+    pub fn from_stream(stream: UnixStream) -> Self {
+        Self { stream }
+    }
+}
+
+fn read_message(stream: &mut UnixStream) -> Result<Message, BusError> {
+    let mut fixed = [0; FIXED_HEADER_BYTES];
+    stream.read_exact(&mut fixed)?;
+    let total = wire::message_len(&fixed)?;
+    assert!(total >= FIXED_HEADER_BYTES);
+    let mut bytes = vec![0; total];
+    bytes[..FIXED_HEADER_BYTES].copy_from_slice(&fixed);
+    stream.read_exact(&mut bytes[FIXED_HEADER_BYTES..])?;
+    Ok(Message::parse(bytes)?)
 }
 
 fn remote_error(message: &Message) -> BusError {
@@ -240,7 +314,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs a session bus: cargo test -- --ignored"]
+    fn a_split_connection_carries_messages_across() {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        let mut writer = BusWriter::from_stream(ours);
+        let mut reader = BusReader::from_stream(theirs);
+        let serial = writer.send(&Header::signal("/a", "a.b", "Ping", ""), &[]).unwrap();
+        let message = reader.receive().unwrap();
+        assert_eq!((message.kind(), message.serial()), (Kind::Signal, serial));
+        writer.shutdown();
+        assert!(matches!(reader.receive(), Err(BusError::Io(_))), "a shut-down connection ends the reader");
+    }
+
+    #[test]
+    #[ignore = "needs a session bus: make test-live"]
     fn says_hello_to_the_session_bus() {
         Bus::session().unwrap();
     }

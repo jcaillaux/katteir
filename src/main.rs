@@ -22,13 +22,16 @@ use slint::ComponentHandle;
 use crate::cats::CatClips;
 use crate::config::Config;
 use crate::overlay::Overlay;
-use crate::platform::Platform;
+use crate::platform::{Platform, TrayAction, TrayState};
 use crate::timer::{Event, State, Timer, TimerSettings};
 
 slint::include_modules!();
 
 /// How often the timer is polled; its deadlines don't depend on this.
 const TICK: Duration = Duration::from_millis(250);
+/// The Wayland app id (X11 class). Docks match it to `catnap.desktop` for
+/// the icon (`make install-desktop`).
+const APP_ID: &str = "catnap";
 
 struct App {
     config: Config,
@@ -54,10 +57,16 @@ fn main() -> anyhow::Result<()> {
     // RUST_LOG overrides this.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("catnap=info,warn")).init();
     slint::BackendSelector::new().require_opengl_es().select().context("selecting the OpenGL ES renderer")?;
+    slint::set_xdg_app_id(APP_ID).context("setting the app id")?;
     let config_path = config::config_path()?;
     let (config, notice) = load_config(&config_path);
 
     let ui = SettingsWindow::new()?;
+    let Some(platform) = Platform::start(tray_handler(ui.as_weak())) else {
+        log::info!("catnap is already running: its settings window is shown instead");
+        return Ok(());
+    };
+    let platform = Rc::new(platform);
     set_limits(&ui);
     show_config(&ui, &config);
     ui.set_notice_is_warning(!notice.is_empty());
@@ -67,7 +76,6 @@ fn main() -> anyhow::Result<()> {
 
     let timer = Timer::new(TimerSettings::from(&config.timer));
     let app = Rc::new(RefCell::new(App { config, config_path, timer, cat_clips: None }));
-    let platform = Rc::new(Platform::start());
     let ctx = Ctx { app, ui: ui.as_weak(), overlay: Rc::downgrade(&overlay), platform };
     wire_timer_buttons(&ui, &ctx);
     wire_settings(&ui, &ctx);
@@ -76,7 +84,20 @@ fn main() -> anyhow::Result<()> {
     let _ticker = start_ticker(&ctx);
     ctx.after_timer_change(Instant::now());
 
-    ui.run()?;
+    let close_platform = Rc::clone(&ctx.platform);
+    ui.window().on_close_requested(move || {
+        // With a tray icon the window can be opened again, so catnap keeps
+        // running; without one, a hidden window would be lost.
+        if close_platform.tray_available() {
+            return slint::CloseRequestResponse::HideWindow;
+        }
+        if let Err(error) = slint::quit_event_loop() {
+            log::error!("cannot quit: {error}");
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+    ui.show()?;
+    slint::run_event_loop_until_quit()?;
     Ok(())
 }
 
@@ -243,7 +264,13 @@ impl Ctx {
                 _ => overlay.hide(),
             }
         }
-        self.with_ui(|ui| refresh_status(ui, &app.timer, now));
+        let controls = tray_state(&app.timer, now);
+        self.platform.set_tray_state(&controls);
+        let tray_available = self.platform.tray_available();
+        self.with_ui(|ui| {
+            refresh_status(ui, &app.timer, now, &controls);
+            ui.set_tray_available(tray_available);
+        });
     }
 
     /// Ends the break early: the cat window's hold-to-dismiss button.
@@ -372,17 +399,62 @@ fn saved_notice(adjusted: &[config::Adjusted], warnings: &[String]) -> (String, 
     (notice, !adjusted.is_empty() || !warnings.is_empty())
 }
 
-fn refresh_status(ui: &SettingsWindow, timer: &Timer, now: Instant) {
+/// The settings window's status line and buttons; the buttons follow the
+/// same rules as the tray menu's (`controls`).
+fn refresh_status(ui: &SettingsWindow, timer: &Timer, now: Instant, controls: &TrayState) {
     let left = timer.time_left(now).map(timer::minutes_seconds).unwrap_or_default();
-    let state = timer.state();
-    let status = match state {
+    let status = match timer.state() {
         State::Idle => "Idle".to_owned(),
         State::Working { .. } => format!("Working: break in {left}"),
         State::Paused { .. } => format!("Paused: {left} left"),
         State::Break { .. } => format!("Break: {left} left"),
     };
     ui.set_status(status.into());
-    ui.set_can_start(matches!(state, State::Idle | State::Paused { .. }));
-    ui.set_can_pause(matches!(state, State::Working { .. }));
-    ui.set_can_stop(!matches!(state, State::Idle));
+    ui.set_can_start(controls.can_start);
+    ui.set_can_pause(controls.can_pause);
+    ui.set_can_stop(controls.can_stop);
+}
+
+/// The tray menu's view of the timer. It counts whole minutes, so the menu
+/// changes at most once a minute.
+fn tray_state(timer: &Timer, now: Instant) -> TrayState {
+    let minutes = timer.time_left(now).map_or(0, |left| timer::whole_secs_up(left).div_ceil(60));
+    let state = timer.state();
+    let status = match state {
+        State::Idle => "Idle".to_owned(),
+        State::Working { .. } => format!("Working: break in {minutes} min"),
+        State::Paused { .. } => format!("Paused: {minutes} min left"),
+        State::Break { .. } => format!("On a break: {minutes} min left"),
+    };
+    TrayState {
+        status,
+        can_start: matches!(state, State::Idle | State::Paused { .. }),
+        can_pause: matches!(state, State::Working { .. }),
+        can_stop: !matches!(state, State::Idle),
+    }
+}
+
+/// Carries out tray menu choices. The tray calls this on its own thread, so
+/// each choice is handed to the UI thread.
+fn tray_handler(ui: slint::Weak<SettingsWindow>) -> impl Fn(TrayAction) + Send + 'static {
+    move |action| {
+        let handed_over = match action {
+            TrayAction::ShowSettings => ui.upgrade_in_event_loop(|ui| {
+                if let Err(error) = ui.show() {
+                    log::warn!("cannot show the settings window: {error}");
+                }
+            }),
+            TrayAction::Start => ui.upgrade_in_event_loop(|ui| ui.invoke_start()),
+            TrayAction::Pause => ui.upgrade_in_event_loop(|ui| ui.invoke_pause()),
+            TrayAction::Stop => ui.upgrade_in_event_loop(|ui| ui.invoke_stop()),
+            TrayAction::Quit => slint::invoke_from_event_loop(|| {
+                if let Err(error) = slint::quit_event_loop() {
+                    log::error!("cannot quit: {error}");
+                }
+            }),
+        };
+        if let Err(error) = handed_over {
+            log::warn!("tray choice {action:?} lost: {error}");
+        }
+    }
 }

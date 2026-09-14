@@ -45,3 +45,7 @@ pub const MAX_DBUS_ADDRESSES: usize = 8;
 pub const DBUS_TIMEOUT: Duration = Duration::from_secs(5);
 /// Notifications waiting for the notification thread; more are dropped.
 pub const NOTIFICATION_QUEUE_DEPTH: usize = 4;
+/// Bus messages and state updates waiting for the tray thread.
+pub const TRAY_QUEUE_DEPTH: usize = 16;
+/// Items, property names or events read from one tray menu request.
+pub const MAX_MENU_REQUEST_ITEMS: usize = 64;
