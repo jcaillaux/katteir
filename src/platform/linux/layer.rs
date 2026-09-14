@@ -49,9 +49,15 @@ use smithay_client_toolkit::{
     delegate_shm, registry_handlers,
 };
 use wayland_client::backend::WaylandError;
-use wayland_client::globals::registry_queue_init;
+use wayland_client::globals::{GlobalList, registry_queue_init};
 use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface};
-use wayland_client::{Connection, EventQueue, Proxy, QueueHandle};
+use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::{
+    self, WpFractionalScaleManagerV1,
+};
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{self, WpFractionalScaleV1};
+use wayland_protocols::wp::viewporter::client::wp_viewport::{self, WpViewport};
+use wayland_protocols::wp::viewporter::client::wp_viewporter::{self, WpViewporter};
 
 use crate::limits::{LAYER_POLL, MAX_LAYER_EVENTS, MAX_LAYER_SCALE, MAX_SCREENS};
 
@@ -89,7 +95,10 @@ pub enum LayerError {
 enum SurfaceEvent {
     /// The compositor's size for the surface, in logical pixels.
     Configure { width: u32, height: u32 },
+    /// The output's integer scale (`wl_output`); unused with fractional scaling.
     Scale(i32),
+    /// The preferred scale in 120ths (`wp_fractional_scale_v1`).
+    FractionalScale(u32),
     Frame,
     Closed,
     Pointer(WindowEvent),
@@ -98,12 +107,56 @@ enum SurfaceEvent {
 /// A `SurfaceEvent` and the surface it's for.
 type Routed = (wl_surface::WlSurface, SurfaceEvent);
 
+/// Scales in the fractional-scale protocol's unit: 120 is 1.0.
+const SCALE_ONE: u16 = 120;
+
+/// The globals for fractional scaling: the compositor's preferred scale for
+/// each surface, and viewports to show a buffer of that size at the
+/// surface's logical size. Absent on older compositors: integer scales then.
+struct Fractional {
+    manager: WpFractionalScaleManagerV1,
+    viewporter: WpViewporter,
+}
+
+fn bind_fractional(globals: &GlobalList, handle: &QueueHandle<State>) -> Option<Fractional> {
+    let manager = match globals.bind::<WpFractionalScaleManagerV1, _, _>(handle, 1..=1, ()) {
+        Ok(manager) => manager,
+        Err(error) => {
+            log::debug!("cat window: no fractional scaling ({error})");
+            return None;
+        }
+    };
+    match globals.bind::<WpViewporter, _, _>(handle, 1..=1, ()) {
+        Ok(viewporter) => Some(Fractional { manager, viewporter }),
+        Err(error) => {
+            log::debug!("cat window: no viewporter, so no fractional scaling ({error})");
+            manager.destroy();
+            None
+        }
+    }
+}
+
+/// A logical length at a scale in 120ths, rounded half away from zero as
+/// the fractional-scale protocol asks.
+fn physical_px(logical: u32, scale_120: u16) -> u32 {
+    let scaled = u64::from(logical) * u64::from(scale_120);
+    u32::try_from((scaled + u64::from(SCALE_ONE / 2)) / u64::from(SCALE_ONE)).unwrap_or(u32::MAX)
+}
+
+/// A preferred scale from the compositor, kept to what we render at: from
+/// half size to `MAX_LAYER_SCALE`.
+fn clamp_scale_120(scale_120: u32) -> u16 {
+    let highest = u32::from(SCALE_ONE) * u32::from(MAX_LAYER_SCALE);
+    u16::try_from(scale_120.clamp(u32::from(SCALE_ONE / 2), highest)).unwrap_or(SCALE_ONE)
+}
+
 /// The Wayland connection and globals, for the whole run.
 pub struct LayerShell {
     // Dropped in this order: EGL before the connection it came from.
     config: Config,
     display: Display,
     layers: WlrLayerShell,
+    fractional: Option<Fractional>,
     /// Every cat window made on this connection.
     windows: RefCell<Vec<Weak<LayerWindow>>>,
     /// Filled by each poll, kept so polling doesn't allocate.
@@ -138,6 +191,7 @@ impl LayerShell {
         let (globals, queue) = registry_queue_init::<State>(&connection)?;
         let handle = queue.handle();
         let layers = WlrLayerShell::bind(&globals, &handle)?;
+        let fractional = bind_fractional(&globals, &handle);
         let state = State {
             registry: RegistryState::new(&globals),
             compositor: CompositorState::bind(&globals, &handle)?,
@@ -152,6 +206,7 @@ impl LayerShell {
             config,
             display,
             layers,
+            fractional,
             windows: RefCell::new(Vec::with_capacity(MAX_SCREENS)),
             events: RefCell::new(Vec::with_capacity(MAX_LAYER_EVENTS)),
             poll: slint::Timer::default(),
@@ -346,9 +401,17 @@ unsafe impl OpenGLInterface for Gl {
     }
 }
 
+/// A surface's fractional scale object and viewport, destroyed with it.
+struct SurfaceScaling {
+    fractional: WpFractionalScaleV1,
+    viewport: WpViewport,
+}
+
 /// The layer surface of a shown window.
 struct Shown {
     layer: LayerSurface,
+    /// Fractional scaling for this surface, where the compositor offers it.
+    scaling: Option<SurfaceScaling>,
     /// The first configure arrived: the size is known and EGL is attached.
     configured: bool,
     /// A frame callback is outstanding: don't draw until it fires.
@@ -364,7 +427,8 @@ pub struct LayerWindow {
     shown: RefCell<Option<Shown>>,
     /// Surface size in logical pixels, from the last configure.
     logical_size: Cell<(u32, u32)>,
-    scale: Cell<u8>,
+    /// The scale in 120ths (`SCALE_ONE` is 1.0).
+    scale_120: Cell<u16>,
     needs_redraw: Cell<bool>,
     /// The output it covers, by index in the compositor's list.
     screen: usize,
@@ -381,7 +445,7 @@ impl LayerWindow {
                 renderer: FemtoVGOpenGLRenderer::new_suspended(),
                 shown: RefCell::new(None),
                 logical_size: Cell::new((1, 1)),
-                scale: Cell::new(1),
+                scale_120: Cell::new(SCALE_ONE),
                 needs_redraw: Cell::new(false),
                 screen,
                 shell: Rc::clone(shell),
@@ -408,12 +472,19 @@ impl LayerWindow {
             return;
         };
         let layer = self.shell.create_overlay(&output);
-        // A new wl_surface starts at buffer scale 1. The scale kept from the
-        // last break's surface would make us render at that scale without
-        // telling this surface, so it would show oversized (across screens);
-        // the compositor's scale event for this surface sets the real one.
-        self.scale.set(1);
-        *self.shown.borrow_mut() = Some(Shown { layer, configured: false, frame_pending: false });
+        let scaling = self.shell.fractional.as_ref().map(|fractional| {
+            let surface = layer.wl_surface();
+            SurfaceScaling {
+                fractional: fractional.manager.get_fractional_scale(surface, &self.shell.handle, surface.clone()),
+                viewport: fractional.viewporter.get_viewport(surface, &self.shell.handle, ()),
+            }
+        });
+        // A new wl_surface starts at scale 1. The scale kept from the last
+        // break's surface would make us render at that scale without telling
+        // this surface, so it would show oversized (across screens); the
+        // compositor's scale event for this surface sets the real one.
+        self.scale_120.set(SCALE_ONE);
+        *self.shown.borrow_mut() = Some(Shown { layer, scaling, configured: false, frame_pending: false });
         self.shell.start_polling();
     }
 
@@ -422,6 +493,10 @@ impl LayerWindow {
         // The renderer drops the EGL surface; then the wl_surface can go.
         if let Err(error) = self.renderer.clear_graphics_context() {
             log::warn!("cat window: {error}");
+        }
+        if let Some(scaling) = &shown.scaling {
+            scaling.viewport.destroy();
+            scaling.fractional.destroy();
         }
         drop(shown);
         if let Err(error) = self.shell.connection.flush() {
@@ -434,6 +509,7 @@ impl LayerWindow {
         match event {
             SurfaceEvent::Configure { width, height } => self.configured(width, height),
             SurfaceEvent::Scale(factor) => self.rescale(factor),
+            SurfaceEvent::FractionalScale(scale_120) => self.set_scale_120(clamp_scale_120(scale_120)),
             SurfaceEvent::Frame => {
                 if let Some(shown) = self.shown.borrow_mut().as_mut() {
                     shown.frame_pending = false;
@@ -461,6 +537,14 @@ impl LayerWindow {
             !std::mem::replace(&mut shown.configured, true)
         };
         self.logical_size.set((width.max(1), height.max(1)));
+        // With fractional scaling the buffer is bigger than the surface: the
+        // viewport shows it at the surface's logical size.
+        if let Some(scaling) = self.shown.borrow().as_ref().and_then(|shown| shown.scaling.as_ref()) {
+            let (width, height) = self.logical_size.get();
+            scaling
+                .viewport
+                .set_destination(i32::try_from(width).unwrap_or(i32::MAX), i32::try_from(height).unwrap_or(i32::MAX));
+        }
         if first && let Err(error) = self.attach_gl() {
             log::error!("cat window: {error}");
             self.hide();
@@ -477,24 +561,32 @@ impl LayerWindow {
         Ok(())
     }
 
+    /// The integer scale of the output the surface is on. Ignored when the
+    /// surface has fractional scaling, which gives the exact scale instead.
     fn rescale(&self, factor: i32) {
-        let scale = u8::try_from(factor.clamp(1, i32::from(MAX_LAYER_SCALE))).unwrap_or(1);
-        if scale == self.scale.get() {
+        if self.shown.borrow().as_ref().is_some_and(|shown| shown.scaling.is_some()) {
             return;
         }
-        self.scale.set(scale);
-        let configured = self.shown.borrow().as_ref().map(|shown| {
+        let scale = u8::try_from(factor.clamp(1, i32::from(MAX_LAYER_SCALE))).unwrap_or(1);
+        if let Some(shown) = self.shown.borrow().as_ref() {
             shown.layer.wl_surface().set_buffer_scale(i32::from(scale));
-            shown.configured
-        });
-        if configured == Some(true) {
+        }
+        self.set_scale_120(u16::from(scale) * SCALE_ONE);
+    }
+
+    fn set_scale_120(&self, scale_120: u16) {
+        if scale_120 == self.scale_120.get() {
+            return;
+        }
+        self.scale_120.set(scale_120);
+        if self.shown.borrow().as_ref().is_some_and(|shown| shown.configured) {
             self.announce_size();
         }
     }
 
     /// Tells Slint the scale and size, and asks for a redraw.
     fn announce_size(&self) {
-        let scale_factor = f32::from(self.scale.get());
+        let scale_factor = f32::from(self.scale_120.get()) / f32::from(SCALE_ONE);
         self.window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor });
         self.window.dispatch_event(WindowEvent::Resized { size: self.size().to_logical(scale_factor) });
         self.needs_redraw.set(true);
@@ -538,8 +630,8 @@ impl WindowAdapter for LayerWindow {
 
     fn size(&self) -> PhysicalSize {
         let (width, height) = self.logical_size.get();
-        let scale = u32::from(self.scale.get());
-        PhysicalSize::new(width.saturating_mul(scale), height.saturating_mul(scale))
+        let scale_120 = self.scale_120.get();
+        PhysicalSize::new(physical_px(width, scale_120), physical_px(height, scale_120))
     }
 
     fn renderer(&self) -> &dyn Renderer {
@@ -708,6 +800,42 @@ impl OutputHandler for State {
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
 }
 
+impl Dispatch<WpFractionalScaleV1, wl_surface::WlSurface> for State {
+    fn event(
+        state: &mut Self,
+        _: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        surface: &wl_surface::WlSurface,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            state.push(surface, SurfaceEvent::FractionalScale(scale));
+        }
+    }
+}
+
+// The manager, viewporter and viewports send no events.
+impl Dispatch<WpFractionalScaleManagerV1, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WpFractionalScaleManagerV1,
+        _: wp_fractional_scale_manager_v1::Event,
+        (): &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WpViewporter, ()> for State {
+    fn event(_: &mut Self, _: &WpViewporter, _: wp_viewporter::Event, (): &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WpViewport, ()> for State {
+    fn event(_: &mut Self, _: &WpViewport, _: wp_viewport::Event, (): &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
 impl ShmHandler for State {
     fn shm_state(&mut self) -> &mut Shm {
         &mut self.shm
@@ -742,6 +870,24 @@ mod tests {
     }
 
     #[test]
+    fn fractional_sizes_round_half_away_from_zero() {
+        // The dev laptop's panel: 1920x1080 at 1.25 is 1536x864 logical.
+        assert_eq!(physical_px(1536, 150), 1920);
+        assert_eq!(physical_px(864, 150), 1080);
+        assert_eq!(physical_px(1280, SCALE_ONE), 1280);
+        // 101 x 1.5 = 151.5 rounds up.
+        assert_eq!(physical_px(101, 180), 152);
+        assert_eq!(physical_px(100, 2 * SCALE_ONE), 200);
+    }
+
+    #[test]
+    fn preferred_scales_stay_in_range() {
+        assert_eq!(clamp_scale_120(150), 150);
+        assert_eq!(clamp_scale_120(0), SCALE_ONE / 2);
+        assert_eq!(clamp_scale_120(10_000), SCALE_ONE * u16::from(MAX_LAYER_SCALE));
+    }
+
+    #[test]
     fn zero_sizes_become_one_pixel() {
         assert_eq!(nonzero(0).get(), 1);
         assert_eq!(nonzero(1920).get(), 1920);
@@ -754,7 +900,7 @@ mod tests {
     fn the_compositor_offers_layer_shell() {
         let shell = LayerShell::try_connect().unwrap();
         let screens = shell.screen_count();
-        eprintln!("layer-shell screens: {screens}");
+        eprintln!("layer-shell screens: {screens}, fractional scaling: {}", shell.fractional.is_some());
         let state = shell.state.borrow();
         for output in state.outputs.outputs() {
             if let Some(info) = state.outputs.info(&output) {

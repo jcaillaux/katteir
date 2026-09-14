@@ -251,7 +251,14 @@ pill sits bottom centre.
     over the cat and the dismiss button can't be aimed at. That's a
     `ThemedPointer`: the cursor-shape protocol where the compositor has it,
     else the cursor theme.
-  - Integer output scale only; fractional scaling is untested.
+  - **Fractional scaling:** where the compositor offers
+    `wp_fractional_scale_v1` and `wp_viewporter` (labwc does; checked with
+    `make test-live`), each surface gets the compositor's preferred scale in
+    120ths. The window renders a buffer of `round(logical × scale / 120)`
+    pixels, leaves the buffer scale at 1, and a viewport shows it at the
+    logical size. The dev laptop's 1.25 panel (1536×864 logical) gets
+    exactly 1920×1080, not a 2× buffer the compositor shrinks. Without those
+    protocols, the output's integer scale is used through `set_buffer_scale`.
   - Without layer-shell (GNOME, X11) the cat window is the winit
     fullscreen window, as before. The choice follows the compositor's
     globals, never its name. `make test-live` checks the layer-shell setup

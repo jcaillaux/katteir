@@ -39,6 +39,8 @@ wayland-client = "=0.31.15"
 wayland-backend = { version = "=0.3.17", default-features = false, features = ["client_system"] }
 glutin = { version = "=0.32.3", default-features = false, features = ["egl", "wayland"] }
 raw-window-handle = "=0.6.2"
+# Fractional scaling (wp_fractional_scale_v1, staging) and wp_viewporter.
+wayland-protocols = { version = "=0.32.13", default-features = false, features = ["client", "staging"] }
 
 [build-dependencies]
 slint-build = "=1.17.1"
