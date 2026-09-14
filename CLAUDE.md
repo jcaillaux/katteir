@@ -21,8 +21,9 @@ fully before touching code. When in doubt, ask; do not guess.
 - **Footprint is a feature.** Target ≤ 7 MB stripped binary per platform
   excluding cat assets. This was raised from 5 MB on 2026-09-14: desktop Slint
   is 5.2 MB even with `patches/` applied, and dav1d plus the video code is
-  ~1.3 MB (see `spikes/slint-size/`). If a dependency adds megabytes, justify
-  it in this file or drop it.
+  ~1.3 MB (see `spikes/slint-size/`). M1 was 7.20 MB until zbus was patched
+  out of Slint (`patches/README.md`); it's now 6.32 MB. If a dependency adds
+  megabytes, justify it in this file or drop it.
 - Behaviour to match (observed from the original extension):
   - Cat sequence = one **entry** clip (the reference clip is ~11 s: the cat
     walks in, turns and lies down) followed by a looping **sleep** clip.
@@ -43,7 +44,7 @@ fully before touching code. When in doubt, ask; do not guess.
 | Concern | Choice | Notes |
 |---|---|---|
 | Language | Rust, stable, edition 2024 | |
-| UI | `slint` `=1.17.1`, **patched** | `backend-winit` + `renderer-femtovg` (OpenGL ES). The cat is drawn from a GL texture, which the software renderer can't show, and a renderer is chosen once per process. **Never Skia.** `i-slint-core` and `i-slint-backend-winit` come from `patches/` via `[patch.crates-io]` (10.1 → 5.2 MB): no complex-script line breaking, no runtime SVG/PNG/JPEG decoding (so no image files in `.slint`; draw icons as `Path`s or pass raw RGBA), and a plain title bar on GNOME Wayland. Upgrading Slint means re-applying them (`patches/README.md`). `i-slint-common` is also listed directly, only to enable `fontconfig-dlopen` (fontconfig loaded at runtime, not linked). |
+| UI | `slint` `=1.17.1`, **patched** | `backend-winit` + `renderer-femtovg` (OpenGL ES). The cat is drawn from a GL texture, which the software renderer can't show, and a renderer is chosen once per process. **Never Skia.** `i-slint-core` and `i-slint-backend-winit` come from `patches/` via `[patch.crates-io]` (10.1 → 5.2 MB): no complex-script line breaking, no runtime SVG/PNG/JPEG decoding (so no image files in `.slint`; draw icons as `Path`s or pass raw RGBA), a plain title bar on GNOME Wayland, and no XDG portal settings watcher (it pulls in zbus, 0.88 MB; Slint no longer follows the desktop's colour scheme, accent, font or cursor blink, and our theme is fixed anyway). Upgrading Slint means re-applying them (`patches/README.md`). `i-slint-common` is also listed directly, only to enable `fontconfig-dlopen` (fontconfig loaded at runtime, not linked). |
 | GL calls | `glow` | Raw GL for the video shader, only in `src/video/`. ~33 KiB. |
 | Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top` | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland (§5). |
 | Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |

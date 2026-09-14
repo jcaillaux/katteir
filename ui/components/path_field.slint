@@ -31,15 +31,36 @@ export component PathField inherits Rectangle {
                 border-radius: Theme.radius;
                 background: Theme.surface;
 
-                TextInput {
+                // A TextInput doesn't scroll by itself: it's as wide as its
+                // text, clipped here, and slid sideways to keep the cursor in
+                // view (as Slint's LineEdit does).
+                Rectangle {
                     x: 8px;
                     width: parent.width - 16px;
-                    text <=> root.path;
-                    vertical-alignment: center;
-                    color: Theme.text;
-                    font-size: Theme.font-size-small;
-                    edited => {
-                        root.edited(self.text);
+                    clip: true;
+
+                    TextInput {
+                        // Kept visible this far from either edge while typing.
+                        property <length> cursor-margin: 12px;
+                        property <length> scroll-x;
+                        // Never past the start, and no empty space after the end.
+                        x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll-x));
+                        width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                        height: 100%;
+                        text <=> root.path;
+                        vertical-alignment: center;
+                        color: Theme.text;
+                        font-size: Theme.font-size-small;
+                        cursor-position-changed(cursor) => {
+                            if cursor.x + self.scroll-x < self.cursor-margin {
+                                self.scroll-x = self.cursor-margin - cursor.x;
+                            } else if cursor.x + self.scroll-x > parent.width - self.cursor-margin - self.text-cursor-width {
+                                self.scroll-x = parent.width - cursor.x - self.cursor-margin - self.text-cursor-width;
+                            }
+                        }
+                        edited => {
+                            root.edited(self.text);
+                        }
                     }
                 }
             }
