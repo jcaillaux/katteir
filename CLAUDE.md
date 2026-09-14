@@ -86,6 +86,7 @@ catnap/
 │   ├── main.rs              # wiring only: build windows, start timer, tray
 │   ├── config.rs            # Config struct, load/save, defaults, validation
 │   ├── limits.rs            # fixed limits (§4)
+│   ├── icon.rs              # the icon as ARGB pixels (tray IconPixmap, X11 window icon)
 │   ├── timer.rs             # work/break state machine (pure, no UI, no I/O)
 │   ├── hold.rs              # press-and-hold state machine (pure, tested)
 │   ├── cats.rs              # which clips play: the bundled placeholder or the configured pair
@@ -112,9 +113,11 @@ catnap/
 │   ├── cats/placeholder/    # the bundled cat (CC0, embedded with include_bytes!)
 │   ├── catnap.desktop       # desktop entry; make install-desktop fills in Exec
 │   └── icons/catnap-tray.svg  # the icon (CC0): tray ($XDG_RUNTIME_DIR/catnap/) and desktop entry
+│       └── catnap-tray-<px>.argb  # the same at 16/22/32/48 px, rendered by tools/icons.sh
 ├── tools/
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
-│   └── placeholder.sh       # ffmpeg: draws the placeholder cat, no footage (dev-time only)
+│   ├── placeholder.sh       # ffmpeg: draws the placeholder cat, no footage (dev-time only)
+│   └── icons.sh             # ffmpeg + librsvg: the icon SVG → raw ARGB pixels (dev-time only)
 ├── patches/                 # Cargo.toml-patched Slint crates (see patches/README.md)
 ├── spikes/                  # throwaway experiments, each with a README of results
 ├── dev-assets/              # gitignored local test material (see §7)
@@ -270,10 +273,12 @@ things may differ by OS; everything else is shared.
     watcher's owner changes, for example when the panel restarts.
   - The icon is `assets/icons/catnap-tray.svg`, written to
     `$XDG_RUNTIME_DIR/catnap/` and named through `IconName` +
-    `IconThemePath`, not sent as `IconPixmap`. The ayatana watcher on Budgie
-    and Ubuntu ignores pixmaps (the string isn't in its binary), and
-    Chromium's tray icons, Discord's for example, work the same way. The 15
-    properties copy Chromium's.
+    `IconThemePath`, as Chromium's tray icons do (Discord's, for example).
+    The ayatana watcher behind Budgie's and Ubuntu's AppIndicator applet
+    reads only icon names (`IconPixmap` isn't in its binary). The icon is
+    also sent as `IconPixmap` (16, 22, 32 and 48 px from `src/icon.rs`) for
+    hosts that ignore icon folders. The 16 properties are Chromium's 15 plus
+    `IconPixmap`.
   - Menu (`com.canonical.dbusmenu` at `/MenuBar`): a status line in whole
     minutes (so at most one update a minute), Start/Pause/Stop, Settings…,
     Quit catnap. On ayatana a left click opens the menu; hosts that send
@@ -281,9 +286,23 @@ things may differ by OS; everything else is shared.
   - Two threads: a reader blocked on the socket, and the tray thread, which
     handles bus messages and state updates from one bounded queue. Menu
     choices reach the UI through `slint::Weak::upgrade_in_event_loop`.
-  - While the tray is up, closing the settings window keeps catnap running
-    (`run_event_loop_until_quit`, ended by Quit). Without a tray, closing it
-    quits as before.
+  - The tray's presence is `Starting`, `Shown` or `Absent`. Plain GNOME
+    has no tray host, so there it's `Absent`, and catnap registers anyway if
+    a host appears later. Only while it's `Shown` does closing the settings
+    window keep catnap running (`run_event_loop_until_quit`, ended by Quit);
+    otherwise closing quits. The window says which applies.
+- **Linux: standards, not desktops.** Everything goes through freedesktop
+  standards that are the same on X11 and Wayland: D-Bus (notifications,
+  StatusNotifierItem + dbusmenu, the single-instance name) and files
+  (desktop entry, icon theme, XDG autostart). Code never branches on
+  `XDG_CURRENT_DESKTOP` or the compositor. The display server only matters
+  for the cat window, which has one baseline everywhere (fullscreen,
+  see-through) plus extras where they work (always-on-top on X11;
+  layer-shell on Wayland stays deferred). No XEmbed tray: it's X11-only and
+  obsolete, and every current X11 desktop hosts StatusNotifierItem.
+- **Window icon:** the same pixels through Slint's `icon` property. winit
+  sets `_NET_WM_ICON` on X11 and ignores it on Wayland (0.30.13 has no
+  xdg-toplevel-icon); there `catnap.desktop` supplies the icon.
 - **One catnap per session:** at startup, `Platform::start` claims the bus
   name `catnap.Instance`. If it's taken, it calls `Show` on the owner (which
   opens its settings window) and returns `None`, and main exits. The owner's

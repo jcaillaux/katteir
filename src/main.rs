@@ -5,6 +5,7 @@
 mod cats;
 mod config;
 mod hold;
+mod icon;
 mod limits;
 mod overlay;
 mod platform;
@@ -22,7 +23,7 @@ use slint::ComponentHandle;
 use crate::cats::CatClips;
 use crate::config::Config;
 use crate::overlay::Overlay;
-use crate::platform::{Platform, TrayAction, TrayState};
+use crate::platform::{Platform, TrayAction, TrayPresence, TrayState};
 use crate::timer::{Event, State, Timer, TimerSettings};
 
 slint::include_modules!();
@@ -67,6 +68,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     };
     let platform = Rc::new(platform);
+    ui.set_window_icon(icon::window_icon());
     set_limits(&ui);
     show_config(&ui, &config);
     ui.set_notice_is_warning(!notice.is_empty());
@@ -88,7 +90,7 @@ fn main() -> anyhow::Result<()> {
     ui.window().on_close_requested(move || {
         // With a tray icon the window can be opened again, so catnap keeps
         // running; without one, a hidden window would be lost.
-        if close_platform.tray_available() {
+        if close_platform.tray_presence() == TrayPresence::Shown {
             return slint::CloseRequestResponse::HideWindow;
         }
         if let Err(error) = slint::quit_event_loop() {
@@ -266,10 +268,10 @@ impl Ctx {
         }
         let controls = tray_state(&app.timer, now);
         self.platform.set_tray_state(&controls);
-        let tray_available = self.platform.tray_available();
+        let hint = tray_hint(self.platform.tray_presence());
         self.with_ui(|ui| {
             refresh_status(ui, &app.timer, now, &controls);
-            ui.set_tray_available(tray_available);
+            ui.set_tray_hint(hint);
         });
     }
 
@@ -431,6 +433,15 @@ fn tray_state(timer: &Timer, now: Instant) -> TrayState {
         can_start: matches!(state, State::Idle | State::Paused { .. }),
         can_pause: matches!(state, State::Working { .. }),
         can_stop: !matches!(state, State::Idle),
+    }
+}
+
+/// What the settings window says closing it does.
+fn tray_hint(presence: TrayPresence) -> TrayHint {
+    match presence {
+        TrayPresence::Starting => TrayHint::Unknown,
+        TrayPresence::Shown => TrayHint::InTray,
+        TrayPresence::Absent => TrayHint::NoTray,
     }
 }
 

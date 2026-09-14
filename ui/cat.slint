@@ -8,6 +8,10 @@ export component CatWindow inherits Window {
     background: transparent;
     always-on-top: true;
 
+    // catnap's icon as pixels, for X11 taskbars (see app.slint).
+    in property <image> window-icon;
+    icon: root.window-icon;
+
     in property <image> frame;
     // Set to true just after the window shows: the cat slides in from the right.
     in property <bool> arrived;

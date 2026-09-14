@@ -18,6 +18,17 @@ pub struct TrayState {
     pub can_stop: bool,
 }
 
+/// Whether catnap has a tray icon. A closed settings window can only be
+/// opened again from it, so closing the window quits unless it's `Shown`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayPresence {
+    /// Not known yet: registration is under way.
+    Starting,
+    Shown,
+    /// No tray host (plain GNOME), no session bus, or the host went away.
+    Absent,
+}
+
 /// A choice made in the tray.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
@@ -81,16 +92,14 @@ impl Platform {
         log::info!("notification: {summary}: {body}");
     }
 
-    /// Whether the tray icon is showing, so a closed settings window can be
-    /// opened again from it.
-    pub fn tray_available(&self) -> bool {
+    pub fn tray_presence(&self) -> TrayPresence {
         #[cfg(target_os = "linux")]
         {
-            self.tray.as_ref().is_some_and(linux::tray::Tray::is_available)
+            self.tray.as_ref().map_or(TrayPresence::Absent, linux::tray::Tray::presence)
         }
         #[cfg(not(target_os = "linux"))]
         {
-            false
+            TrayPresence::Absent
         }
     }
 

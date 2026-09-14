@@ -17,6 +17,7 @@ use slint::ComponentHandle;
 use crate::CatWindow;
 use crate::cats::CatClips;
 use crate::hold::HoldToDismiss;
+use crate::icon;
 use crate::timer;
 use crate::video::decode::Decoder;
 use crate::video::gl::{self, GlVideo};
@@ -74,6 +75,7 @@ impl Overlay {
             arrive_timer: slint::Timer::default(),
             on_dismissed: Rc::new(RefCell::new(None)),
         });
+        overlay.window.set_window_icon(icon::window_icon());
         overlay.install_renderer()?;
         overlay.install_hold();
         Ok(overlay)

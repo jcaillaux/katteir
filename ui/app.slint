@@ -11,6 +11,10 @@ export struct IntRange {
     max: int,
 }
 
+// What closing the settings window does: unknown while the tray icon is
+// still registering.
+export enum TrayHint { unknown, in-tray, no-tray }
+
 component SectionTitle inherits Text {
     color: Theme.text-muted;
     font-size: Theme.font-size-small;
@@ -50,8 +54,11 @@ export component SettingsWindow inherits Window {
     // Warnings (adjusted values, unusable clips, a failed save) show in red.
     in property <bool> notice-is-warning;
     in property <string> config-path;
-    // A tray icon is showing: closing this window keeps catnap running.
-    in property <bool> tray-available;
+    in property <TrayHint> tray-hint;
+    // catnap's icon as pixels, for X11 taskbars (_NET_WM_ICON). Wayland
+    // ignores it; there the icon comes from catnap.desktop.
+    in property <image> window-icon;
+    icon: root.window-icon;
 
     callback start();
     callback pause();
@@ -189,8 +196,10 @@ export component SettingsWindow inherits Window {
             wrap: word-wrap;
         }
 
-        if root.tray-available: Text {
-            text: "Closing this window keeps catnap running in the tray.";
+        if root.tray-hint != TrayHint.unknown: Text {
+            text: root.tray-hint == TrayHint.in-tray
+                ? "Closing this window keeps catnap running in the tray."
+                : "No tray found: closing this window quits catnap.";
             color: Theme.text-muted;
             font-size: Theme.font-size-small;
             wrap: word-wrap;

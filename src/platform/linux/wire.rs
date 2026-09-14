@@ -313,6 +313,13 @@ impl Writer {
         self.buf.push(0);
     }
 
+    /// A byte array ("ay").
+    pub fn bytes(&mut self, value: &[u8]) {
+        let array = self.begin_array(1);
+        self.buf.extend_from_slice(value);
+        self.end_array(array);
+    }
+
     /// Opens an array of elements aligned to `element_align` (8 for structs
     /// and dict entries). The padding before the first element is written
     /// even when the array stays empty.

@@ -14,15 +14,16 @@ use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread::JoinHandle;
 
 use super::bus::{Bus, BusError, BusReader, BusWriter};
 use super::{instance, menu};
 use super::wire::{Header, Kind, Message, NO_REPLY_EXPECTED, Reader, WireError, Writer};
+use crate::icon;
 use crate::limits::{MAX_MENU_REQUEST_ITEMS, TRAY_QUEUE_DEPTH};
-use crate::platform::{TrayAction, TrayState};
+use crate::platform::{TrayAction, TrayPresence, TrayState};
 
 const BUS_NAME: &str = "org.freedesktop.DBus";
 const WATCHER: &str = "org.kde.StatusNotifierWatcher";
@@ -46,13 +47,15 @@ const ICON_NAME: &str = "catnap-tray";
 const FALLBACK_ICON_NAME: &str = "appointment-soon";
 const ICON_SVG: &[u8] = include_bytes!("../../../assets/icons/catnap-tray.svg");
 
-/// The item's properties and their types: the set Chromium's tray icons expose.
-const ITEM_PROPERTIES: [(&str, &str); 15] = [
+/// The item's properties and their types: the set Chromium's tray icons
+/// expose, plus `IconPixmap` for hosts that ignore `IconThemePath`.
+const ITEM_PROPERTIES: [(&str, &str); 16] = [
     ("AttentionIconName", "s"),
     ("AttentionIconPixmap", "a(iiay)"),
     ("AttentionMovieName", "s"),
     ("Category", "s"),
     ("IconName", "s"),
+    ("IconPixmap", "a(iiay)"),
     ("IconThemePath", "s"),
     ("Id", "s"),
     ("ItemIsMenu", "b"),
@@ -79,9 +82,32 @@ enum Input {
     Quit,
 }
 
+/// Whether the icon is up, shared by the tray's thread and the UI's.
+#[derive(Debug, Default)]
+struct Presence(AtomicU8);
+
+impl Presence {
+    fn set(&self, presence: TrayPresence) {
+        let value = match presence {
+            TrayPresence::Starting => 0,
+            TrayPresence::Shown => 1,
+            TrayPresence::Absent => 2,
+        };
+        self.0.store(value, Ordering::Relaxed);
+    }
+
+    fn get(&self) -> TrayPresence {
+        match self.0.load(Ordering::Relaxed) {
+            0 => TrayPresence::Starting,
+            1 => TrayPresence::Shown,
+            _ => TrayPresence::Absent,
+        }
+    }
+}
+
 pub struct Tray {
     inputs: SyncSender<Input>,
-    available: Arc<AtomicBool>,
+    presence: Arc<Presence>,
     /// The last state queued, so unchanged ticks aren't sent.
     queued: RefCell<Option<TrayState>>,
     worker: Option<JoinHandle<()>>,
@@ -92,17 +118,17 @@ impl Tray {
     /// thread registers the icon on its own.
     pub fn start(bus: Bus, on_action: Box<dyn Fn(TrayAction) + Send>) -> std::io::Result<Self> {
         let (inputs, queue) = sync_channel(TRAY_QUEUE_DEPTH);
-        let available = Arc::new(AtomicBool::new(false));
-        let (feed, shared) = (inputs.clone(), Arc::clone(&available));
+        let presence = Arc::new(Presence::default());
+        let (feed, shared) = (inputs.clone(), Arc::clone(&presence));
         let worker = std::thread::Builder::new()
             .name("catnap-tray".to_owned())
             .spawn(move || run(bus, queue, feed, shared, on_action))?;
-        Ok(Self { inputs, available, queued: RefCell::new(None), worker: Some(worker) })
+        Ok(Self { inputs, presence, queued: RefCell::new(None), worker: Some(worker) })
     }
 
-    /// Whether a tray host accepted the icon.
-    pub fn is_available(&self) -> bool {
-        self.available.load(Ordering::Relaxed)
+    /// Whether a tray host has accepted the icon (yet).
+    pub fn presence(&self) -> TrayPresence {
+        self.presence.get()
     }
 
     /// Passes a changed state to the tray. Never blocks: when the queue is
@@ -135,26 +161,21 @@ fn run(
     bus: Bus,
     queue: Receiver<Input>,
     feed: SyncSender<Input>,
-    available: Arc<AtomicBool>,
+    presence: Arc<Presence>,
     on_action: Box<dyn Fn(TrayAction) + Send>,
 ) {
     let name = format!("{ITEM}-{}-1", std::process::id());
-    let (writer, reader) = match set_up(bus, &name) {
+    let halves = set_up(bus, &name).and_then(|(writer, reader)| Ok((writer, spawn_reader(reader, feed)?)));
+    let (writer, reader) = match halves {
         Ok(halves) => halves,
         Err(error) => {
             log::warn!("no tray icon: {error}");
-            return;
-        }
-    };
-    let reader = match spawn_reader(reader, feed) {
-        Ok(reader) => reader,
-        Err(error) => {
-            log::warn!("no tray icon: {error}");
+            presence.set(TrayPresence::Absent);
             return;
         }
     };
     let state = TrayState { status: "catnap".to_owned(), can_start: false, can_pause: false, can_stop: false };
-    let mut item = Item { writer, name, icon: Icon::write(), state, revision: 1, register_serial: None, available, on_action };
+    let mut item = Item { writer, name, icon: Icon::write(), state, revision: 1, register_serial: None, presence, on_action };
     item.register();
     for input in &queue {
         match input {
@@ -167,7 +188,7 @@ fn run(
             Input::Quit => break,
         }
     }
-    item.available.store(false, Ordering::Relaxed);
+    item.presence.set(TrayPresence::Absent);
     item.writer.shutdown();
     // The reader may be waiting to hand over a message: dropping the queue
     // releases it.
@@ -245,7 +266,7 @@ struct Item {
     revision: u32,
     /// The `RegisterStatusNotifierItem` call waiting for its reply.
     register_serial: Option<u32>,
-    available: Arc<AtomicBool>,
+    presence: Arc<Presence>,
     on_action: Box<dyn Fn(TrayAction) + Send>,
 }
 
@@ -494,7 +515,7 @@ impl Item {
         } else {
             log::warn!("no tray icon: {}", reply.error_name().unwrap_or("the tray host refused it"));
         }
-        self.available.store(accepted, Ordering::Relaxed);
+        self.presence.set(if accepted { TrayPresence::Shown } else { TrayPresence::Absent });
     }
 
     /// The watcher's `NameOwnerChanged` (our match rule): register again when
@@ -507,7 +528,7 @@ impl Item {
         }
         if new_owner.is_empty() {
             log::info!("the tray host went away");
-            self.available.store(false, Ordering::Relaxed);
+            self.presence.set(TrayPresence::Absent);
         } else {
             self.register();
         }
@@ -574,6 +595,18 @@ fn write_item_property(writer: &mut Writer, name: &str, state: &TrayState, icon:
         "Status" => variant_str(writer, "Active"),
         "IconName" => variant_str(writer, icon.name),
         "IconThemePath" => variant_str(writer, &icon.dir),
+        "IconPixmap" => {
+            // Width, height, ARGB32 bytes, for each size.
+            writer.variant("a(iiay)");
+            let pixmaps = writer.begin_array(8);
+            for pixmap in &icon::PIXMAPS {
+                writer.begin_struct();
+                writer.i32(i32::from(pixmap.size_px));
+                writer.i32(i32::from(pixmap.size_px));
+                writer.bytes(pixmap.argb);
+            }
+            writer.end_array(pixmaps);
+        }
         "AttentionIconName" | "OverlayIconName" | "AttentionMovieName" => variant_str(writer, ""),
         "AttentionIconPixmap" | "OverlayIconPixmap" => {
             writer.variant("a(iiay)");
@@ -691,7 +724,7 @@ mod tests {
             state: working(),
             revision: 1,
             register_serial: None,
-            available: Arc::new(AtomicBool::new(false)),
+            presence: Arc::new(Presence::default()),
             on_action: Box::new(move |action| seen.lock().unwrap().push(action)),
         };
         (item, BusReader::from_stream(theirs), actions)
@@ -845,7 +878,7 @@ mod tests {
         let serial = item.register_serial.unwrap();
         let accepted = Header::method_return(serial, None, "");
         item.handle(&Message::parse(encode(&accepted, 5, &[]).unwrap()).unwrap());
-        assert!(item.available.load(Ordering::Relaxed));
+        assert_eq!(item.presence.get(), TrayPresence::Shown);
         assert_eq!(item.register_serial, None);
 
         item.register();
@@ -854,7 +887,7 @@ mod tests {
         text.str("no watcher");
         let refused = Header::error(serial, None, "org.freedesktop.DBus.Error.ServiceUnknown");
         item.handle(&Message::parse(encode(&refused, 6, &text.into_bytes()).unwrap()).unwrap());
-        assert!(!item.available.load(Ordering::Relaxed));
+        assert_eq!(item.presence.get(), TrayPresence::Absent);
     }
 
     #[test]
