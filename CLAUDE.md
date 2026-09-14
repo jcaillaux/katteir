@@ -227,26 +227,46 @@ pill sits bottom centre.
   but does nothing on Wayland: winit's `set_window_level` is empty there, and
   xdg-shell has no such request.
 - **Layer-shell (Wayland):** when the compositor offers `zwlr_layer_shell_v1`
-  (labwc, Sway, KDE, Hyprland, niri; not GNOME), the cat window is a surface
-  on the `overlay` layer instead (`src/platform/linux/layer.rs`). It sits
-  above every window, fullscreen apps and panels included (exclusive zone
-  -1), with no keyboard focus. The compositor picks the output. How it
-  works:
+  (labwc, Sway, KDE, Hyprland, niri; not GNOME), each screen's cat window
+  is a surface on that output's `overlay` layer instead
+  (`src/platform/linux/layer.rs`). It sits above every window, fullscreen
+  apps and panels included (exclusive zone -1), with no keyboard focus. How
+  it works:
   - catnap's Slint platform (`backend.rs`) wraps the winit backend and
-    forwards everything, except that `overlay_window(CatWindow::new)` gets
-    a `LayerWindow` adapter.
+    forwards everything, except that `overlay_window(screen,
+    CatWindow::new)` gets a `LayerWindow` adapter bound to that screen.
   - That adapter has its own Wayland connection (sctk), an EGL context via
     glutin, and Slint's `FemtoVGOpenGLRenderer` through `OpenGLInterface`.
     The overlay's rendering notifier (the video) works unchanged.
-  - The connection is polled every 8 ms, only while the cat is shown.
+  - One timer polls the shared connection every 8 ms while any cat is
+    shown, and routes each event to the window whose surface it's for.
     Frames are paced by frame callbacks, with the swap interval at 0 so
     swapping never blocks.
   - The surface, the EGL context and the GL resources exist only during a
-    break.
+    break. A new surface starts at buffer scale 1, so each window resets its
+    scale when it makes one. Otherwise the scale kept from the last break
+    made the second cat render oversized, across both screens.
+  - The client has to set the cursor each time the pointer enters one of its
+    surfaces (Wayland leaves it to the client), or the cursor is invisible
+    over the cat and the dismiss button can't be aimed at. That's a
+    `ThemedPointer`: the cursor-shape protocol where the compositor has it,
+    else the cursor theme.
   - Integer output scale only; fractional scaling is untested.
   - Without layer-shell (GNOME, X11) the cat window is the winit
     fullscreen window, as before. The choice follows the compositor's
-    globals, never its name. `make test-live` checks the layer-shell setup.
+    globals, never its name. `make test-live` checks the layer-shell setup
+    and counts the screens.
+- **One cat per screen:** `Screens::count()` decides how many `CatWindow`s
+  a break shows. It does a Wayland round trip at each break, so hot-plugged
+  screens count, and it's capped at `MAX_SCREENS`. The windows are created
+  on demand and reused.
+  - One decoder feeds them all. Each frame (a reference-counted
+    `dav1d::Picture`) goes into every window's slot, and each window
+    uploads it to its own GL context. The first screen paces playback.
+  - The countdown and hold progress show on every screen, and holding on
+    any of them ends the break everywhere.
+  - X11 and GNOME get one fullscreen window for now: a window per monitor
+    there needs winit's monitor handling.
 - Frames are paced by drawing: a frame is taken only once the previous one
   was drawn. The decoder thread and GL textures exist only while the window
   is shown.
@@ -414,7 +434,8 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
    verify on KDE, Sway, and GNOME, which shows no tray without the
    AppIndicator extension. Then macOS and Windows, with `tray-icon`.
 4. **M3 — polish**: stir on click, real assets, one cat per screen
-   ("multiple cats" means across monitors, not a cat registry), and starting
+   ("multiple cats" means across monitors, not a cat registry; done on
+   layer-shell compositors, X11/GNOME still get one window), and starting
    at login as a setting the user turns on (never on by default). Dropped on
    2026-09-14: the entry→loop cross-fade (not needed) and the more compact
    settings window (the current one is compact enough).

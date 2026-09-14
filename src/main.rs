@@ -57,7 +57,7 @@ fn main() -> anyhow::Result<()> {
     // Our own messages at info, dependencies (winit...) only from warn.
     // RUST_LOG overrides this.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("catnap=info,warn")).init();
-    platform::install_slint().context("setting up Slint")?;
+    let screens = platform::install_slint().context("setting up Slint")?;
     slint::set_xdg_app_id(APP_ID).context("setting the app id")?;
     let config_path = config::config_path()?;
     let (config, notice) = load_config(&config_path);
@@ -74,7 +74,7 @@ fn main() -> anyhow::Result<()> {
     ui.set_notice_is_warning(!notice.is_empty());
     ui.set_notice(notice.into());
     ui.set_config_path(config_path.display().to_string().into());
-    let overlay = Overlay::new()?;
+    let overlay = Overlay::new(screens)?;
 
     let timer = Timer::new(TimerSettings::from(&config.timer));
     let app = Rc::new(RefCell::new(App { config, config_path, timer, cat_clips: None }));

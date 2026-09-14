@@ -56,3 +56,5 @@ pub const LAYER_POLL: Duration = Duration::from_millis(8);
 pub const MAX_LAYER_EVENTS: usize = 256;
 /// Largest output scale the layer-shell cat window renders at.
 pub const MAX_LAYER_SCALE: u8 = 4;
+/// Most screens that get a cat, one window each.
+pub const MAX_SCREENS: usize = 8;

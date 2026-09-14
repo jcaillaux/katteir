@@ -1,14 +1,15 @@
-//! The cat window on Wayland compositors with layer-shell (wlroots-based
-//! ones such as labwc and Sway, KDE, Hyprland, niri; not GNOME): a surface
-//! on the `overlay` layer, above every window, fullscreen apps and panels
-//! included. winit can't make layer surfaces, so this is a Slint window of
-//! our own on a second Wayland connection, drawn by Slint's `FemtoVG`
-//! (OpenGL ES) renderer like the winit windows.
+//! The cat windows on Wayland compositors with layer-shell (wlroots-based
+//! ones such as labwc and Sway, KDE, Hyprland, niri; not GNOME): one surface
+//! per screen on the `overlay` layer, above every window, fullscreen apps
+//! and panels included. winit can't make layer surfaces, so these are Slint
+//! windows of our own on a second Wayland connection, drawn by Slint's
+//! `FemtoVG` (OpenGL ES) renderer like the winit windows.
 //!
-//! The connection lives for the whole run (`LayerShell`). The surface, its
-//! EGL context and the renderer's GL resources exist only while the window
-//! is shown, that is during a break (CLAUDE.md §4). While shown, a Slint
-//! timer polls the connection; there's no extra thread.
+//! The connection lives for the whole run (`LayerShell`). A window's
+//! surface, EGL context and GL resources exist only while it's shown, that
+//! is during a break (CLAUDE.md §4). While any window is shown, one Slint
+//! timer polls the connection and routes events to the window whose surface
+//! they're for; there's no extra thread.
 
 #![allow(unsafe_code)] // Raw Wayland handles for EGL; each unsafe block says why it's sound.
 
@@ -30,26 +31,29 @@ use i_slint_renderer_femtovg::{FemtoVGOpenGLRenderer, FemtoVGOpenGLRendererExt, 
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 use slint::platform::{PointerEventButton, Renderer, WindowAdapter, WindowEvent};
 use slint::{LogicalPosition, PhysicalSize, PlatformError};
-use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
+use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, SurfaceData};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
-use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler};
+use smithay_client_toolkit::seat::pointer::{
+    CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer,
+};
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, Layer, LayerShell as WlrLayerShell, LayerShellHandler, LayerSurface,
     LayerSurfaceConfigure,
 };
+use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{
     delegate_compositor, delegate_layer, delegate_output, delegate_pointer, delegate_registry, delegate_seat,
-    registry_handlers,
+    delegate_shm, registry_handlers,
 };
 use wayland_client::backend::WaylandError;
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface};
 use wayland_client::{Connection, EventQueue, Proxy, QueueHandle};
 
-use crate::limits::{LAYER_POLL, MAX_LAYER_EVENTS, MAX_LAYER_SCALE};
+use crate::limits::{LAYER_POLL, MAX_LAYER_EVENTS, MAX_LAYER_SCALE, MAX_SCREENS};
 
 /// Mouse buttons, from linux/input-event-codes.h.
 const BTN_LEFT: u32 = 0x110;
@@ -80,7 +84,7 @@ pub enum LayerError {
     Slint(#[from] PlatformError),
 }
 
-/// What the Wayland handlers report, for the window to act on after the
+/// What the Wayland handlers report, for a window to act on after the
 /// dispatch (no Slint calls happen inside it).
 enum SurfaceEvent {
     /// The compositor's size for the surface, in logical pixels.
@@ -91,13 +95,22 @@ enum SurfaceEvent {
     Pointer(WindowEvent),
 }
 
+/// A `SurfaceEvent` and the surface it's for.
+type Routed = (wl_surface::WlSurface, SurfaceEvent);
+
 /// The Wayland connection and globals, for the whole run.
 pub struct LayerShell {
     // Dropped in this order: EGL before the connection it came from.
     config: Config,
     display: Display,
-    compositor: CompositorState,
     layers: WlrLayerShell,
+    /// Every cat window made on this connection.
+    windows: RefCell<Vec<Weak<LayerWindow>>>,
+    /// Filled by each poll, kept so polling doesn't allocate.
+    events: RefCell<Vec<Routed>>,
+    /// Runs while any window is shown.
+    poll: slint::Timer,
+    this: Weak<LayerShell>,
     state: RefCell<State>,
     queue: RefCell<EventQueue<State>>,
     handle: QueueHandle<State>,
@@ -110,8 +123,8 @@ impl LayerShell {
     pub fn connect() -> Option<Rc<Self>> {
         match Self::try_connect() {
             Ok(shell) => {
-                log::debug!("the cat window goes on the Wayland overlay layer");
-                Some(Rc::new(shell))
+                log::debug!("the cat windows go on the Wayland overlay layer");
+                Some(shell)
             }
             Err(error) => {
                 log::info!("no layer-shell cat window ({error}); it will be a fullscreen window");
@@ -120,35 +133,108 @@ impl LayerShell {
         }
     }
 
-    fn try_connect() -> Result<Self, LayerError> {
+    fn try_connect() -> Result<Rc<Self>, LayerError> {
         let connection = Connection::connect_to_env()?;
         let (globals, queue) = registry_queue_init::<State>(&connection)?;
         let handle = queue.handle();
-        let compositor = CompositorState::bind(&globals, &handle)?;
         let layers = WlrLayerShell::bind(&globals, &handle)?;
         let state = State {
             registry: RegistryState::new(&globals),
+            compositor: CompositorState::bind(&globals, &handle)?,
+            shm: Shm::bind(&globals, &handle)?,
             seats: SeatState::new(&globals, &handle),
             outputs: OutputState::new(&globals, &handle),
             pointer: None,
             events: Vec::with_capacity(MAX_LAYER_EVENTS),
         };
         let (display, config) = egl_display(&connection)?;
-        Ok(Self {
+        Ok(Rc::new_cyclic(|this| Self {
             config,
             display,
-            compositor,
             layers,
+            windows: RefCell::new(Vec::with_capacity(MAX_SCREENS)),
+            events: RefCell::new(Vec::with_capacity(MAX_LAYER_EVENTS)),
+            poll: slint::Timer::default(),
+            this: this.clone(),
             state: RefCell::new(state),
             queue: RefCell::new(queue),
             handle,
             connection,
-        })
+        }))
+    }
+
+    /// The screens (outputs) right now, after a round trip so that screens
+    /// plugged in or out since the last break count. At least one.
+    pub fn screen_count(&self) -> usize {
+        let mut queue = self.queue.borrow_mut();
+        let mut state = self.state.borrow_mut();
+        if let Err(error) = queue.roundtrip(&mut state) {
+            log::warn!("cat window: Wayland round trip failed ({error})");
+        }
+        state.outputs.outputs().count().clamp(1, MAX_SCREENS)
+    }
+
+    fn output(&self, screen: usize) -> Option<wl_output::WlOutput> {
+        self.state.borrow().outputs.outputs().nth(screen)
+    }
+
+    fn window(&self, index: usize) -> Option<Rc<LayerWindow>> {
+        self.windows.borrow().get(index).and_then(Weak::upgrade)
+    }
+
+    fn window_for(&self, surface: &wl_surface::WlSurface) -> Option<Rc<LayerWindow>> {
+        (0..self.windows.borrow().len()).filter_map(|index| self.window(index)).find(|window| window.owns(surface))
+    }
+
+    fn start_polling(&self) {
+        if self.poll.running() {
+            return;
+        }
+        let this = self.this.clone();
+        self.poll.start(slint::TimerMode::Repeated, LAYER_POLL, move || {
+            if let Some(shell) = this.upgrade() {
+                shell.pump();
+            }
+        });
+    }
+
+    fn stop_polling_if_idle(&self) {
+        let any_shown = (0..self.windows.borrow().len()).any(|index| self.window(index).is_some_and(|w| w.is_shown()));
+        if !any_shown {
+            self.poll.stop();
+        }
+    }
+
+    /// One poll: Wayland events in and to their windows, then the redraws
+    /// that are due.
+    fn pump(&self) {
+        let mut events = self.events.borrow_mut();
+        if let Err(error) = self.dispatch(&mut events) {
+            drop(events);
+            log::error!("cat window: the layer-shell connection failed: {error}");
+            for index in 0..self.windows.borrow().len() {
+                if let Some(window) = self.window(index) {
+                    window.hide();
+                }
+            }
+            return;
+        }
+        for (surface, event) in events.drain(..) {
+            if let Some(window) = self.window_for(&surface) {
+                window.apply(event);
+            }
+        }
+        drop(events);
+        for index in 0..self.windows.borrow().len() {
+            if let Some(window) = self.window(index) {
+                window.draw_if_due();
+            }
+        }
     }
 
     /// Sends pending requests, reads what arrived (never blocking) and runs
     /// the handlers; their events are appended to `events`.
-    fn dispatch(&self, events: &mut Vec<SurfaceEvent>) -> Result<(), LayerError> {
+    fn dispatch(&self, events: &mut Vec<Routed>) -> Result<(), LayerError> {
         let mut queue = self.queue.borrow_mut();
         let mut state = self.state.borrow_mut();
         queue.dispatch_pending(&mut state)?;
@@ -166,11 +252,11 @@ impl LayerShell {
         Ok(())
     }
 
-    /// A surface on the overlay layer covering the output the compositor
-    /// picks, committed so the compositor answers with a configure.
-    fn create_overlay(&self) -> LayerSurface {
-        let surface = self.compositor.create_surface(&self.handle);
-        let layer = self.layers.create_layer_surface(&self.handle, surface, Layer::Overlay, Some("catnap"), None);
+    /// A surface on `output`'s overlay layer covering the whole output,
+    /// committed so the compositor answers with a configure.
+    fn create_overlay(&self, output: &wl_output::WlOutput) -> LayerSurface {
+        let surface = self.state.borrow().compositor.create_surface(&self.handle);
+        let layer = self.layers.create_layer_surface(&self.handle, surface, Layer::Overlay, Some("catnap"), Some(output));
         layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
         // Over panels too. The keyboard stays with the focused app.
         layer.set_exclusive_zone(-1);
@@ -269,7 +355,7 @@ struct Shown {
     frame_pending: bool,
 }
 
-/// The cat window as a Slint window adapter on the overlay layer.
+/// One screen's cat window, as a Slint window adapter on the overlay layer.
 pub struct LayerWindow {
     window: slint::Window,
     // Owns the `Gl` while shown. Declared before `shown` so that, when
@@ -280,16 +366,15 @@ pub struct LayerWindow {
     logical_size: Cell<(u32, u32)>,
     scale: Cell<u8>,
     needs_redraw: Cell<bool>,
-    /// Filled by each poll, kept so polling doesn't allocate.
-    events: RefCell<Vec<SurfaceEvent>>,
-    poll: slint::Timer,
-    this: Weak<LayerWindow>,
+    /// The output it covers, by index in the compositor's list.
+    screen: usize,
     shell: Rc<LayerShell>,
 }
 
 impl LayerWindow {
-    pub fn new(shell: Rc<LayerShell>) -> Rc<Self> {
-        Rc::new_cyclic(|this: &Weak<Self>| {
+    pub fn new(shell: &Rc<LayerShell>, screen: usize) -> Rc<Self> {
+        assert!(screen < MAX_SCREENS, "screen {screen}");
+        let window = Rc::new_cyclic(|this: &Weak<Self>| {
             let adapter: Weak<dyn WindowAdapter> = this.clone();
             Self {
                 window: slint::Window::new(adapter),
@@ -298,30 +383,41 @@ impl LayerWindow {
                 logical_size: Cell::new((1, 1)),
                 scale: Cell::new(1),
                 needs_redraw: Cell::new(false),
-                events: RefCell::new(Vec::with_capacity(MAX_LAYER_EVENTS)),
-                poll: slint::Timer::default(),
-                this: this.clone(),
-                shell,
+                screen,
+                shell: Rc::clone(shell),
             }
-        })
+        });
+        shell.windows.borrow_mut().push(Rc::downgrade(&window));
+        window
+    }
+
+    fn is_shown(&self) -> bool {
+        self.shown.borrow().is_some()
+    }
+
+    fn owns(&self, surface: &wl_surface::WlSurface) -> bool {
+        self.shown.borrow().as_ref().is_some_and(|shown| shown.layer.wl_surface() == surface)
     }
 
     fn show(&self) {
-        if self.shown.borrow().is_some() {
+        if self.is_shown() {
             return;
         }
-        let layer = self.shell.create_overlay();
+        let Some(output) = self.shell.output(self.screen) else {
+            log::debug!("cat window: screen {} is gone", self.screen);
+            return;
+        };
+        let layer = self.shell.create_overlay(&output);
+        // A new wl_surface starts at buffer scale 1. The scale kept from the
+        // last break's surface would make us render at that scale without
+        // telling this surface, so it would show oversized (across screens);
+        // the compositor's scale event for this surface sets the real one.
+        self.scale.set(1);
         *self.shown.borrow_mut() = Some(Shown { layer, configured: false, frame_pending: false });
-        let this = self.this.clone();
-        self.poll.start(slint::TimerMode::Repeated, LAYER_POLL, move || {
-            if let Some(window) = this.upgrade() {
-                window.pump();
-            }
-        });
+        self.shell.start_polling();
     }
 
     fn hide(&self) {
-        self.poll.stop();
         let Some(shown) = self.shown.borrow_mut().take() else { return };
         // The renderer drops the EGL surface; then the wl_surface can go.
         if let Err(error) = self.renderer.clear_graphics_context() {
@@ -331,22 +427,7 @@ impl LayerWindow {
         if let Err(error) = self.shell.connection.flush() {
             log::warn!("cat window: {error}");
         }
-    }
-
-    /// One poll: Wayland events in, then a redraw if one is due.
-    fn pump(&self) {
-        let mut events = self.events.borrow_mut();
-        if let Err(error) = self.shell.dispatch(&mut events) {
-            drop(events);
-            log::error!("cat window: the layer-shell connection failed: {error}");
-            self.hide();
-            return;
-        }
-        for event in events.drain(..) {
-            self.apply(event);
-        }
-        drop(events);
-        self.draw_if_due();
+        self.shell.stop_polling_if_idle();
     }
 
     fn apply(&self, event: SurfaceEvent) {
@@ -359,11 +440,14 @@ impl LayerWindow {
                 }
             }
             SurfaceEvent::Closed => {
-                log::warn!("cat window: the compositor closed its layer surface");
+                log::warn!("cat window: the compositor closed the layer surface on screen {}", self.screen);
                 self.hide();
             }
             SurfaceEvent::Pointer(event) => {
-                if self.shown.borrow().is_some() {
+                if self.is_shown() {
+                    if matches!(event, WindowEvent::PointerPressed { .. }) {
+                        log::debug!("cat window: press on screen {}", self.screen);
+                    }
                     self.window.dispatch_event(event);
                 }
             }
@@ -467,27 +551,42 @@ impl WindowAdapter for LayerWindow {
     }
 }
 
-/// What sctk's handlers update. Events for the window are collected in
+/// What sctk's handlers update. Events for the windows are collected in
 /// `events` and taken after each dispatch.
 struct State {
     registry: RegistryState,
+    compositor: CompositorState,
+    shm: Shm,
     seats: SeatState,
     outputs: OutputState,
-    pointer: Option<wl_pointer::WlPointer>,
-    events: Vec<SurfaceEvent>,
+    /// Sets the cursor when the pointer enters a cat: Wayland leaves that to
+    /// the client, and without it the cursor is invisible over our surfaces.
+    /// Uses the cursor-shape protocol where the compositor has it, else the
+    /// cursor theme.
+    pointer: Option<ThemedPointer>,
+    events: Vec<Routed>,
 }
 
 impl State {
-    fn push(&mut self, event: SurfaceEvent) {
+    fn push(&mut self, surface: &wl_surface::WlSurface, event: SurfaceEvent) {
         if self.events.len() < MAX_LAYER_EVENTS {
-            self.events.push(event);
+            self.events.push((surface.clone(), event));
+        }
+    }
+
+    /// The normal arrow, set each time the pointer enters one of our surfaces.
+    fn show_cursor(&self, conn: &Connection) {
+        if let Some(pointer) = &self.pointer
+            && let Err(error) = pointer.set_cursor(conn, CursorIcon::Default)
+        {
+            log::debug!("cat window: cursor not set ({error})");
         }
     }
 }
 
 impl CompositorHandler for State {
-    fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, factor: i32) {
-        self.push(SurfaceEvent::Scale(factor));
+    fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, factor: i32) {
+        self.push(surface, SurfaceEvent::Scale(factor));
     }
 
     fn transform_changed(
@@ -499,8 +598,8 @@ impl CompositorHandler for State {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
-        self.push(SurfaceEvent::Frame);
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, _: u32) {
+        self.push(surface, SurfaceEvent::Frame);
     }
 
     fn surface_enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
@@ -509,26 +608,29 @@ impl CompositorHandler for State {
 }
 
 impl LayerShellHandler for State {
-    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {
-        self.push(SurfaceEvent::Closed);
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, layer: &LayerSurface) {
+        self.push(layer.wl_surface(), SurfaceEvent::Closed);
     }
 
     fn configure(
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &LayerSurface,
+        layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
         _: u32,
     ) {
         let (width, height) = configure.new_size;
-        self.push(SurfaceEvent::Configure { width, height });
+        self.push(layer.wl_surface(), SurfaceEvent::Configure { width, height });
     }
 }
 
 impl PointerHandler for State {
-    fn pointer_frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
+    fn pointer_frame(&mut self, conn: &Connection, _: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
         for event in events {
+            if matches!(event.kind, PointerEventKind::Enter { .. }) {
+                self.show_cursor(conn);
+            }
             let position = logical(event.position);
             let slint_event = match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => WindowEvent::PointerMoved { position },
@@ -541,7 +643,7 @@ impl PointerHandler for State {
                 }
                 PointerEventKind::Axis { .. } => continue,
             };
-            self.push(SurfaceEvent::Pointer(slint_event));
+            self.push(&event.surface, SurfaceEvent::Pointer(slint_event));
         }
     }
 }
@@ -569,7 +671,15 @@ impl SeatHandler for State {
 
     fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, capability: Capability) {
         if capability == Capability::Pointer && self.pointer.is_none() {
-            match self.seats.get_pointer(qh, &seat) {
+            let cursor_surface = self.compositor.create_surface(qh);
+            let themed = self.seats.get_pointer_with_theme::<Self, SurfaceData>(
+                qh,
+                &seat,
+                self.shm.wl_shm(),
+                cursor_surface,
+                ThemeSpec::default(),
+            );
+            match themed {
                 Ok(pointer) => self.pointer = Some(pointer),
                 Err(error) => log::warn!("cat window: no pointer ({error})"),
             }
@@ -577,10 +687,9 @@ impl SeatHandler for State {
     }
 
     fn remove_capability(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat, capability: Capability) {
-        if capability == Capability::Pointer
-            && let Some(pointer) = self.pointer.take()
-        {
-            pointer.release();
+        if capability == Capability::Pointer {
+            // Dropping it releases the pointer and its cursor surface.
+            self.pointer = None;
         }
     }
 
@@ -599,6 +708,12 @@ impl OutputHandler for State {
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
 }
 
+impl ShmHandler for State {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
+    }
+}
+
 impl ProvidesRegistryState for State {
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.registry
@@ -609,6 +724,7 @@ impl ProvidesRegistryState for State {
 delegate_compositor!(State);
 delegate_output!(State);
 delegate_seat!(State);
+delegate_shm!(State);
 delegate_pointer!(State);
 delegate_layer!(State);
 delegate_registry!(State);
@@ -631,10 +747,20 @@ mod tests {
         assert_eq!(nonzero(1920).get(), 1920);
     }
 
-    /// Connects, binds layer-shell and sets up EGL; shows nothing.
+    /// Connects, binds layer-shell, sets up EGL and counts the screens;
+    /// shows nothing.
     #[test]
     #[ignore = "needs a Wayland compositor with layer-shell: make test-live"]
     fn the_compositor_offers_layer_shell() {
-        LayerShell::try_connect().unwrap();
+        let shell = LayerShell::try_connect().unwrap();
+        let screens = shell.screen_count();
+        eprintln!("layer-shell screens: {screens}");
+        let state = shell.state.borrow();
+        for output in state.outputs.outputs() {
+            if let Some(info) = state.outputs.info(&output) {
+                eprintln!("  {:?}: integer scale {}, logical size {:?}", info.name, info.scale_factor, info.logical_size);
+            }
+        }
+        assert!(screens >= 1);
     }
 }

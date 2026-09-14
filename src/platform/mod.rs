@@ -7,7 +7,7 @@ mod backend;
 #[cfg(target_os = "linux")]
 mod linux;
 
-pub use backend::{install_slint, overlay_window};
+pub use backend::{Screens, install_slint, overlay_window};
 
 /// What the tray menu shows. main sends it on every timer tick; only
 /// changes go further.

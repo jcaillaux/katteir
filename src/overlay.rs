@@ -1,14 +1,17 @@
-//! The cat window (CLAUDE.md §3): shown when a break starts, hidden when it
-//! ends. It owns the decoder and the hold-to-dismiss state for the break.
-//! It's always an overlay: fullscreen, see-through, on top where the
-//! platform allows (see `ui/cat.slint`).
+//! The cat windows (CLAUDE.md §3): one per screen, shown when a break starts
+//! and hidden when it ends. They share one decoder and one hold-to-dismiss:
+//! each decoded frame goes to every window, which uploads it to its own GL
+//! context, and holding the button on any screen ends the break everywhere.
+//! They're always overlays: fullscreen, see-through, on top where the
+//! platform allows (see `ui/cat.slint` and `platform/backend.rs`).
 //!
 //! Frames are paced by drawing: a tick at the clip rate takes the next frame
-//! only once the previous one was drawn. When the compositor stops drawing a
-//! hidden window, decoding stops too (the decoder blocks on its full queue).
+//! only once the first screen has drawn the previous one. When the
+//! compositor stops drawing, decoding stops too (the decoder blocks on its
+//! full queue).
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, Instant};
 
@@ -18,13 +21,15 @@ use crate::CatWindow;
 use crate::cats::CatClips;
 use crate::hold::HoldToDismiss;
 use crate::icon;
+use crate::limits::MAX_SCREENS;
+use crate::platform::{self, Screens};
 use crate::timer;
 use crate::video::decode::Decoder;
 use crate::video::gl::{self, GlVideo};
 
 /// How often the hold progress is refreshed while the button is held.
 const HOLD_TICK: Duration = Duration::from_millis(33);
-/// Delay between showing the window and starting the slide-in, so the cat
+/// Delay between showing the windows and starting the slide-in, so the cat
 /// starts off-screen at the window's final size.
 const ARRIVE_DELAY: Duration = Duration::from_millis(100);
 
@@ -38,47 +43,60 @@ pub enum OverlayError {
     Decoder(#[from] std::io::Error),
 }
 
-/// State shared by the frame tick, the renderer and the hold callbacks.
+/// State shared by the frame tick, the renderers and the hold callbacks.
 #[derive(Default)]
 struct Playback {
     decoder: Option<Decoder>,
-    /// Decoded and waiting to be drawn.
-    pending: Option<dav1d::Picture>,
-    /// A frame was taken and not drawn yet: don't take the next one.
+    /// The first screen hasn't drawn the last frame yet: don't take the next.
     awaiting_draw: bool,
     hold_remaining_ticks: u32,
     stacked_size_px: (u32, u32),
     hold: Option<HoldToDismiss>,
 }
 
+/// A frame waiting for one window's next draw. Pictures are reference
+/// counted, so every window holding the same frame costs nothing.
+type FrameSlot = Rc<RefCell<Option<dav1d::Picture>>>;
+
+/// One screen's cat window.
+struct Screen {
+    window: CatWindow,
+    frame: FrameSlot,
+}
+
 type Callback = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 pub struct Overlay {
-    window: CatWindow,
-    visible: Cell<bool>,
+    screens: Screens,
+    /// One per screen seen so far, reused across breaks. The first paces
+    /// the video.
+    windows: RefCell<Vec<Screen>>,
+    /// How many windows the current break uses; 0 when hidden.
+    shown_count: Cell<usize>,
     playback: Rc<RefCell<Playback>>,
     frame_timer: slint::Timer,
     hold_timer: slint::Timer,
     arrive_timer: slint::Timer,
     on_dismissed: Callback,
+    this: Weak<Overlay>,
 }
 
 impl Overlay {
-    /// Creates the (hidden) cat window.
-    pub fn new() -> Result<Rc<Self>, OverlayError> {
-        let overlay = Rc::new(Self {
-            // On the Wayland overlay layer where the compositor allows it.
-            window: crate::platform::overlay_window(CatWindow::new)?,
-            visible: Cell::new(false),
+    /// Creates the first (hidden) cat window; the others come with the
+    /// breaks that need them.
+    pub fn new(screens: Screens) -> Result<Rc<Self>, OverlayError> {
+        let overlay = Rc::new_cyclic(|this| Self {
+            screens,
+            windows: RefCell::new(Vec::with_capacity(MAX_SCREENS)),
+            shown_count: Cell::new(0),
             playback: Rc::new(RefCell::new(Playback::default())),
             frame_timer: slint::Timer::default(),
             hold_timer: slint::Timer::default(),
             arrive_timer: slint::Timer::default(),
             on_dismissed: Rc::new(RefCell::new(None)),
+            this: this.clone(),
         });
-        overlay.window.set_window_icon(icon::window_icon());
-        overlay.install_renderer()?;
-        overlay.install_hold();
+        overlay.ensure_windows(1)?;
         Ok(overlay)
     }
 
@@ -87,10 +105,12 @@ impl Overlay {
         *self.on_dismissed.borrow_mut() = Some(Rc::new(callback));
     }
 
-    /// Shows the window fullscreen and starts playing `clips`. `hold` is how
+    /// Shows a cat on every screen and starts playing `clips`. `hold` is how
     /// long the dismiss button must be held.
     pub fn show(&self, clips: &CatClips, hold: Duration) -> Result<(), OverlayError> {
         self.hide();
+        let count = self.screens.count().clamp(1, MAX_SCREENS);
+        self.ensure_windows(count)?;
         let decoder = Decoder::start(clips.entry.clone(), clips.looped.clone())?;
         let base_fps = decoder.base_fps();
         *self.playback.borrow_mut() = Playback {
@@ -99,25 +119,30 @@ impl Overlay {
             hold: Some(HoldToDismiss::new(hold)),
             ..Playback::default()
         };
-        self.window.set_arrived(false);
-        self.window.set_hold_progress(0.0);
-        self.window.set_hold_text(format!("Hold {} s to dismiss", hold.as_secs()).into());
-        self.window.window().set_fullscreen(true);
-        self.window.show()?;
-        self.visible.set(true);
+        let hold_text = slint::SharedString::from(format!("Hold {} s to dismiss", hold.as_secs()));
+        self.shown_count.set(count);
+        for index in 0..count {
+            let Some(window) = self.window(index) else { continue };
+            window.set_arrived(false);
+            window.set_hold_progress(0.0);
+            window.set_hold_text(hold_text.clone());
+            window.window().set_fullscreen(true);
+            window.show()?;
+        }
         self.start_frames(base_fps);
-        let weak = self.window.as_weak();
+        let this = self.this.clone();
         self.arrive_timer.start(slint::TimerMode::SingleShot, ARRIVE_DELAY, move || {
-            if let Some(window) = weak.upgrade() {
-                window.set_arrived(true);
+            if let Some(overlay) = this.upgrade() {
+                overlay.each_shown(|window| window.set_arrived(true));
             }
         });
         Ok(())
     }
 
-    /// Hides the window and stops the decoder. Does nothing when hidden.
+    /// Hides the windows and stops the decoder. Does nothing when hidden.
     pub fn hide(&self) {
-        if !self.visible.replace(false) {
+        let count = self.shown_count.replace(0);
+        if count == 0 {
             return;
         }
         self.frame_timer.stop();
@@ -125,30 +150,71 @@ impl Overlay {
         self.arrive_timer.stop();
         let decoder = {
             let mut playback = self.playback.borrow_mut();
-            playback.pending = None;
             playback.hold = None;
             playback.decoder.take()
         };
         // Joins the decoder thread, outside the borrow.
         drop(decoder);
-        if let Err(error) = self.window.hide() {
-            log::warn!("cannot hide the cat window: {error}");
+        for screen in self.windows.borrow().iter() {
+            screen.frame.borrow_mut().take();
         }
-        self.window.set_arrived(false);
+        for index in 0..count {
+            let Some(window) = self.window(index) else { continue };
+            if let Err(error) = window.hide() {
+                log::warn!("cannot hide the cat window on screen {index}: {error}");
+            }
+            window.set_arrived(false);
+        }
     }
 
     /// Updates the break countdown.
     pub fn set_break_left(&self, left: Duration) {
-        self.window.set_countdown(timer::minutes_seconds(left).into());
+        let text = slint::SharedString::from(timer::minutes_seconds(left));
+        self.each_shown(|window| window.set_countdown(text.clone()));
+    }
+
+    fn window(&self, index: usize) -> Option<CatWindow> {
+        self.windows.borrow().get(index).map(|screen| screen.window.clone_strong())
+    }
+
+    fn each_shown(&self, action: impl Fn(&CatWindow)) {
+        for index in 0..self.shown_count.get() {
+            if let Some(window) = self.window(index) {
+                action(&window);
+            }
+        }
+    }
+
+    /// Creates cat windows up to `count`, each for its own screen.
+    fn ensure_windows(&self, count: usize) -> Result<(), OverlayError> {
+        assert!((1..=MAX_SCREENS).contains(&count));
+        let existing = self.windows.borrow().len();
+        for index in existing..count {
+            let window = platform::overlay_window(index, CatWindow::new)?;
+            window.set_window_icon(icon::window_icon());
+            let frame: FrameSlot = Rc::new(RefCell::new(None));
+            self.install_renderer(&window, &frame, index == 0)?;
+            self.install_hold(&window);
+            self.windows.borrow_mut().push(Screen { window, frame });
+        }
+        Ok(())
     }
 
     fn start_frames(&self, base_fps: u32) {
         assert!(base_fps > 0);
-        let (playback, weak) = (self.playback.clone(), self.window.as_weak());
+        let this = self.this.clone();
         let interval = Duration::from_secs_f64(1.0 / f64::from(base_fps));
         self.frame_timer.start(slint::TimerMode::Repeated, interval, move || {
-            let Some(window) = weak.upgrade() else { return };
-            let mut playback = playback.borrow_mut();
+            if let Some(overlay) = this.upgrade() {
+                overlay.frame_tick();
+            }
+        });
+    }
+
+    /// Takes the next frame when it's due and hands it to every window.
+    fn frame_tick(&self) {
+        let picture = {
+            let mut playback = self.playback.borrow_mut();
             if playback.awaiting_draw {
                 return;
             }
@@ -161,32 +227,41 @@ impl Overlay {
                 Some(Ok(frame)) => {
                     assert!(frame.hold_ticks >= 1);
                     playback.hold_remaining_ticks = frame.hold_ticks - 1;
-                    playback.pending = Some(frame.picture);
                     playback.awaiting_draw = true;
-                    window.window().request_redraw();
+                    frame.picture
                 }
                 Some(Err(TryRecvError::Disconnected)) => {
                     log::warn!("the decoder stopped; the cat stays on its last frame");
                     playback.decoder = None;
+                    return;
                 }
-                Some(Err(TryRecvError::Empty)) | None => {}
+                Some(Err(TryRecvError::Empty)) | None => return,
             }
-        });
+        };
+        let windows = self.windows.borrow();
+        for screen in windows.iter().take(self.shown_count.get()) {
+            *screen.frame.borrow_mut() = Some(picture.clone());
+            screen.window.window().request_redraw();
+        }
     }
 
-    fn install_renderer(&self) -> Result<(), slint::SetRenderingNotifierError> {
-        let (playback, weak) = (self.playback.clone(), self.window.as_weak());
+    /// Draws the window's waiting frame before each render. `paces`: this is
+    /// the window whose draws let the next frame through.
+    fn install_renderer(
+        &self,
+        window: &CatWindow,
+        frame: &FrameSlot,
+        paces: bool,
+    ) -> Result<(), slint::SetRenderingNotifierError> {
+        let (playback, frame, weak) = (self.playback.clone(), Rc::clone(frame), window.as_weak());
         let mut context: Option<Rc<glow::Context>> = None;
         let mut video: Option<GlVideo> = None;
-        self.window.window().set_rendering_notifier(move |state, graphics_api| match state {
+        window.window().set_rendering_notifier(move |state, graphics_api| match state {
             slint::RenderingState::RenderingSetup => context = gl::context(graphics_api),
             slint::RenderingState::BeforeRendering => {
                 let (Some(window), Some(context)) = (weak.upgrade(), context.as_ref()) else { return };
-                let (picture, size) = {
-                    let mut playback = playback.borrow_mut();
-                    (playback.pending.take(), playback.stacked_size_px)
-                };
-                let Some(picture) = picture else { return };
+                let Some(picture) = frame.borrow_mut().take() else { return };
+                let size = playback.borrow().stacked_size_px;
                 if video.as_ref().is_none_or(|video| video.stacked_size_px() != size) {
                     video = GlVideo::new(context.clone(), size.0, size.1)
                         .map_err(|error| log::error!("cannot set up the video shader: {error}"))
@@ -195,7 +270,9 @@ impl Overlay {
                 if let Some(video) = video.as_mut() {
                     window.set_frame(video.draw_frame(&picture));
                 }
-                playback.borrow_mut().awaiting_draw = false;
+                if paces {
+                    playback.borrow_mut().awaiting_draw = false;
+                }
             }
             slint::RenderingState::RenderingTeardown => {
                 video = None;
@@ -205,28 +282,28 @@ impl Overlay {
         })
     }
 
-    fn install_hold(self: &Rc<Self>) {
-        let this = Rc::downgrade(self);
-        self.window.on_hold_pressed(move || {
+    fn install_hold(&self, window: &CatWindow) {
+        let this = self.this.clone();
+        window.on_hold_pressed(move || {
             if let Some(overlay) = this.upgrade() {
                 overlay.hold_pressed();
             }
         });
-        let this = Rc::downgrade(self);
-        self.window.on_hold_released(move || {
+        let this = self.this.clone();
+        window.on_hold_released(move || {
             if let Some(overlay) = this.upgrade() {
                 overlay.hold_released();
             }
         });
     }
 
-    fn hold_pressed(self: &Rc<Self>) {
+    fn hold_pressed(&self) {
         {
             let mut playback = self.playback.borrow_mut();
             let Some(hold) = playback.hold.as_mut() else { return };
             hold.press(Instant::now());
         }
-        let this = Rc::downgrade(self);
+        let this = self.this.clone();
         self.hold_timer.start(slint::TimerMode::Repeated, HOLD_TICK, move || {
             if let Some(overlay) = this.upgrade() {
                 overlay.hold_tick();
@@ -245,10 +322,10 @@ impl Overlay {
         else {
             return;
         };
-        self.window.set_hold_progress(progress);
+        self.each_shown(|window| window.set_hold_progress(progress));
         if done {
-            // Cloned out first: the callback hides this window, which borrows
-            // the playback state again.
+            // Cloned out first: the callback hides these windows, which
+            // borrows the playback state again.
             let callback = self.on_dismissed.borrow().clone();
             if let Some(callback) = callback {
                 callback();
@@ -261,6 +338,6 @@ impl Overlay {
             hold.release();
         }
         self.hold_timer.stop();
-        self.window.set_hold_progress(0.0);
+        self.each_shown(|window| window.set_hold_progress(0.0));
     }
 }
