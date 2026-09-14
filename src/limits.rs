@@ -2,6 +2,7 @@
 //! and file inputs are rejected past them.
 
 use std::ops::RangeInclusive;
+use std::time::Duration;
 
 /// Most cats catnap will list.
 #[allow(dead_code)] // Used by the cat registry (M3).
@@ -26,3 +27,21 @@ pub const MAX_CAT_NAME_BYTES: usize = 64;
 pub const MAX_PATH_BYTES: usize = 4096;
 /// Largest config file catnap will read.
 pub const MAX_CONFIG_BYTES: usize = 64 * 1024;
+
+/// Largest D-Bus message catnap sends or reads (the spec allows 128 MiB).
+/// The biggest planned is the tray icon: a few ARGB sizes, tens of KiB.
+pub const MAX_DBUS_MESSAGE_BYTES: usize = 256 * 1024;
+/// Deepest container nesting read from a D-Bus signature (the spec allows 64).
+pub const MAX_DBUS_DEPTH: usize = 16;
+/// Header fields read per D-Bus message (the spec defines 9).
+pub const MAX_DBUS_HEADER_FIELDS: usize = 16;
+/// Longest line of the D-Bus authentication exchange.
+pub const MAX_DBUS_AUTH_LINE_BYTES: usize = 512;
+/// Messages read while waiting for one reply; the others are dropped.
+pub const MAX_DBUS_MESSAGES_PER_CALL: usize = 64;
+/// Entries tried from `DBUS_SESSION_BUS_ADDRESS`.
+pub const MAX_DBUS_ADDRESSES: usize = 8;
+/// Longest a D-Bus read or write may block.
+pub const DBUS_TIMEOUT: Duration = Duration::from_secs(5);
+/// Notifications waiting for the notification thread; more are dropped.
+pub const NOTIFICATION_QUEUE_DEPTH: usize = 4;

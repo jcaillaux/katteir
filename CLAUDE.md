@@ -22,7 +22,8 @@ fully before touching code. When in doubt, ask; do not guess.
   excluding cat assets. This was raised from 5 MB on 2026-09-14: desktop Slint
   is 5.2 MB even with `patches/` applied, and dav1d plus the video code is
   ~1.3 MB (see `spikes/slint-size/`). M1 was 7.20 MB until zbus was patched
-  out of Slint (`patches/README.md`); it's now 6.32 MB. If a dependency adds
+  out of Slint (`patches/README.md`), then 6.32 MB; with M2's notifications
+  it's 6.36 MB. If a dependency adds
   megabytes, justify it in this file or drop it.
 - Behaviour to match (observed from the original extension):
   - Cat sequence = one **entry** clip (the reference clip is ~11 s: the cat
@@ -48,8 +49,8 @@ fully before touching code. When in doubt, ask; do not guess.
 | GL calls | `glow` | Raw GL for the video shader, only in `src/video/`. ~33 KiB. |
 | Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top` | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland (§5). |
 | Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |
-| Tray | `ksni` on Linux (pure Rust SNI/D-Bus), `tray-icon` on macOS/Windows | Do NOT enable `tray-icon`'s Linux backend (pulls GTK/libappindicator). |
-| Notifications | `notify-rust` | |
+| Tray | Linux: our own StatusNotifierItem + dbusmenu on the D-Bus client below (next M2 step). macOS/Windows: `tray-icon` | Not `ksni`: it and `notify-rust` need zbus, measured on 2026-09-14 at +1.21 MB and 58 crates (catnap 6.32 → 7.53 MB). Do NOT enable `tray-icon`'s Linux backends (GTK/libappindicator, or `ksni`). |
+| Notifications | Linux: `org.freedesktop.Notifications` through our own blocking D-Bus client, `src/platform/linux/` (+35 KB, no dependencies). macOS/Windows: decided in M2 | Not `notify-rust` (zbus, see Tray). |
 | Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/catnap/config.toml` etc. (schema in §5). With logging, errors and our own code, M0 is 5.84 MB stripped against 5.19 MB for Slint alone, so ~0.65 MB. |
 | Logging | `log` + `env_logger` | `env_logger` with default features off: no regex, no `jiff` timestamps, no colour. `RUST_LOG` still filters. |
 | Errors | `thiserror` in lib code; `anyhow` only in `main.rs` | |
@@ -89,8 +90,11 @@ catnap/
 │   ├── hold.rs              # press-and-hold state machine (pure, tested)
 │   ├── cats.rs              # which clips play: the bundled placeholder or the configured pair
 │   ├── platform/
-│   │   ├── mod.rs           # trait Platform { tray, notify, display_mode }
-│   │   ├── linux.rs
+│   │   ├── mod.rs           # Platform: what differs by OS (notifications; the tray next)
+│   │   ├── linux/
+│   │   │   ├── wire.rs      # D-Bus wire format (pure, tested)
+│   │   │   ├── bus.rs       # blocking session-bus connection: auth, Hello, calls
+│   │   │   └── notify.rs    # org.freedesktop.Notifications on a worker thread
 │   │   ├── macos.rs
 │   │   └── windows.rs
 │   ├── video/
@@ -237,22 +241,31 @@ pill sits bottom centre.
   from a borrowed GL texture (`slint::BorrowedOpenGLTextureBuilder`,
   straight alpha).
 
-### Platform trait (`platform/mod.rs`)
-```rust
-pub trait Platform {
-    fn install_tray(&mut self, on_event: Box<dyn Fn(TrayEvent)>) -> Result<(), PlatformError>;
-    fn notify(&self, title: &str, body: &str) -> Result<(), PlatformError>;
-    fn supports_overlay(&self) -> bool;
-    fn raise_window_level(&self, window: &slint::Window) -> Result<(), PlatformError>; // macOS NSWindow.level; no-op elsewhere
-}
-```
-Only these four things are allowed to differ by OS. Everything else is shared.
+### Platform (`platform/mod.rs`)
+One `Platform` struct whose fields and method bodies are picked per OS with
+`#[cfg]`. It isn't a trait, because a build only ever has one
+implementation. Done: `start()` and `notify(summary, body)`, which never
+blocks and only logs failures. Still to come in M2: the tray, and raising
+the cat window's level on macOS (`NSWindow.level`, a no-op elsewhere).
+`supports_overlay` is gone with the overlay-only cat window. Only these
+things may differ by OS; everything else is shared.
+- **Linux D-Bus client:**
+  - Blocking, one connection per worker thread, over the session bus's
+    Unix socket: `DBUS_SESSION_BUS_ADDRESS`, else `$XDG_RUNTIME_DIR/bus`.
+  - `EXTERNAL` authentication with the uid of `/proc/self`.
+  - Little-endian messages only. Sizes, nesting and loops are all bounded
+    by `limits.rs`.
+  - `make test-live` checks it against the real session bus and
+    notification server without showing anything.
+- Each notification replaces catnap's previous one (`replaces_id`), so
+  warnings don't pile up. Checked on Budgie Notification Server 10.10.2.
 
 ## 6. Build & run
 
 ```sh
 make run                                   # build and launch catnap (make help lists all targets)
 make test && make clippy                   # catnap tests; clippy with warnings as errors
+make test-live                             # the ignored tests: real session bus + notification server
 make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
 make run-spike-break                       # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
@@ -310,8 +323,10 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
    `spikes/av1-video/`, a bundled placeholder cat, slide-in, sleep loop,
    press-and-hold dismiss, and a timed break with a countdown badge (which
    replaced `min_break_secs`).
-3. **M2 — platform layer**: Linux tray (`ksni`) + notifications; verify on
-   GNOME Wayland, KDE, Sway. Then macOS and Windows tray via `tray-icon`.
+3. **M2 — platform layer** (in progress): Linux notifications (done) and
+   tray (next), both on our own D-Bus client. Verify on Budgie/labwc (the dev
+   machine), then KDE, Sway, and GNOME, which shows no tray without the
+   AppIndicator extension. Then macOS and Windows, with `tray-icon`.
 4. **M3 — polish**: cross-fade, stir on click, multiple cats, real assets,
    autostart option. Also a more compact settings window, **deferred** on
    2026-09-14 (the current layout is fine for now): tighter sizing (13 px

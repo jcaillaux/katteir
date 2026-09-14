@@ -47,13 +47,14 @@ export PKG_CONFIG_PATH := $(DAV1D)/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_C
 export SYSTEM_DEPS_DAV1D_LINK := static
 
 .PHONY: help run build test clippy clean \
-	run-spike run-spike-break build-spike test-spike clean-spike \
+	test-live run-spike run-spike-break build-spike test-spike clean-spike \
 	deps check-tools clean-deps
 
 help:
 	@echo "make run              build and launch catnap"
 	@echo "make build            release build of catnap (builds dav1d first if needed)"
 	@echo "make test             catnap unit tests"
+	@echo "make test-live        tests against the real session bus (shows nothing)"
 	@echo "make clippy           clippy on catnap, warnings as errors"
 	@echo "make clean            remove catnap's build output"
 	@echo ""
@@ -76,6 +77,11 @@ build: check-tools $(DAV1D_LIB)
 
 test: check-tools $(DAV1D_LIB)
 	cargo test --release
+
+# The #[ignore]d tests: D-Bus calls to this desktop's session bus and
+# notification server. Read-only; nothing appears on screen.
+test-live: check-tools $(DAV1D_LIB)
+	cargo test --release -- --ignored --nocapture
 
 clippy: check-tools $(DAV1D_LIB)
 	cargo clippy --release --all-targets -- -D warnings

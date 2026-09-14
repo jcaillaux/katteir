@@ -7,6 +7,7 @@ mod config;
 mod hold;
 mod limits;
 mod overlay;
+mod platform;
 mod timer;
 mod video;
 
@@ -21,6 +22,7 @@ use slint::ComponentHandle;
 use crate::cats::CatClips;
 use crate::config::Config;
 use crate::overlay::Overlay;
+use crate::platform::Platform;
 use crate::timer::{Event, State, Timer, TimerSettings};
 
 slint::include_modules!();
@@ -44,10 +46,11 @@ struct Ctx {
     app: Rc<RefCell<App>>,
     ui: slint::Weak<SettingsWindow>,
     overlay: Weak<Overlay>,
+    platform: Rc<Platform>,
 }
 
 fn main() -> anyhow::Result<()> {
-    // Our own messages at info, dependencies (zbus, winit...) only from warn.
+    // Our own messages at info, dependencies (winit...) only from warn.
     // RUST_LOG overrides this.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("catnap=info,warn")).init();
     slint::BackendSelector::new().require_opengl_es().select().context("selecting the OpenGL ES renderer")?;
@@ -64,7 +67,8 @@ fn main() -> anyhow::Result<()> {
 
     let timer = Timer::new(TimerSettings::from(&config.timer));
     let app = Rc::new(RefCell::new(App { config, config_path, timer, cat_clips: None }));
-    let ctx = Ctx { app, ui: ui.as_weak(), overlay: Rc::downgrade(&overlay) };
+    let platform = Rc::new(Platform::start());
+    let ctx = Ctx { app, ui: ui.as_weak(), overlay: Rc::downgrade(&overlay), platform };
     wire_timer_buttons(&ui, &ctx);
     wire_settings(&ui, &ctx);
     let dismiss_ctx = ctx.clone();
@@ -255,7 +259,10 @@ impl Ctx {
 
     fn handle_event(&self, event: Event) {
         let (notice, is_warning) = match event {
-            Event::NotifySoon { secs_left } => (format!("Break in {secs_left} s."), false),
+            Event::NotifySoon { secs_left } => {
+                self.platform.notify(&format!("Break in {secs_left} s"), "A cat is about to take over the screen.");
+                (format!("Break in {secs_left} s."), false)
+            }
             Event::BreakStarted => self.start_cat(),
             Event::BreakEnded => ("Back to work.".to_owned(), false),
         };
