@@ -511,16 +511,27 @@ fn tray_hint(presence: TrayPresence) -> TrayHint {
     }
 }
 
+/// Shows the settings window in front. Wayland gives an app no way to raise
+/// its own open window (winit's `focus_window` is empty there), so an open
+/// window is hidden and shown again: compositors put a newly shown window in
+/// front, with focus. What's typed in its fields is kept.
+fn bring_to_front(ui: &SettingsWindow) {
+    if ui.window().is_visible()
+        && let Err(error) = ui.hide()
+    {
+        log::warn!("cannot hide the settings window: {error}");
+    }
+    if let Err(error) = ui.show() {
+        log::warn!("cannot show the settings window: {error}");
+    }
+}
+
 /// Carries out tray menu choices. The tray calls this on its own thread, so
 /// each choice is handed to the UI thread.
 fn tray_handler(ui: slint::Weak<SettingsWindow>) -> impl Fn(TrayAction) + Send + 'static {
     move |action| {
         let handed_over = match action {
-            TrayAction::ShowSettings => ui.upgrade_in_event_loop(|ui| {
-                if let Err(error) = ui.show() {
-                    log::warn!("cannot show the settings window: {error}");
-                }
-            }),
+            TrayAction::ShowSettings => ui.upgrade_in_event_loop(|ui| bring_to_front(&ui)),
             TrayAction::Start => ui.upgrade_in_event_loop(|ui| ui.invoke_start()),
             TrayAction::Pause => ui.upgrade_in_event_loop(|ui| ui.invoke_pause()),
             TrayAction::Stop => ui.upgrade_in_event_loop(|ui| ui.invoke_stop()),

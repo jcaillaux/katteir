@@ -335,6 +335,11 @@ things may differ by OS; everything else is shared.
   - Two threads: a reader blocked on the socket, and the tray thread, which
     handles bus messages and state updates from one bounded queue. Menu
     choices reach the UI through `slint::Weak::upgrade_in_event_loop`.
+  - "Settings…", and a second launch's `Show`, bring an open settings window
+    to the front by hiding and showing it again. Wayland gives an app no way
+    to raise its own window (winit 0.30's `focus_window` is empty there),
+    and compositors put a newly shown window in front with focus. The
+    window's contents are kept; the compositor may place it again.
   - The tray's presence is `Starting`, `Shown` or `Absent`. Plain GNOME
     has no tray host, so there it's `Absent`, and catnap registers anyway if
     a host appears later. Only while it's `Shown` does closing the settings
