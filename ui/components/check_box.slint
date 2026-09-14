@@ -1,0 +1,62 @@
+import { Theme } from "../theme.slint";
+
+// A labelled checkbox. The tick is a vector path: the patched Slint can't
+// decode image files. Space toggles it when it has keyboard focus.
+export component CheckBox inherits Rectangle {
+    in property <string> label;
+    in-out property <bool> checked;
+    callback toggled(bool);
+
+    height: Theme.control-height;
+    preferred-width: box.width + Theme.spacing + label-text.preferred-width;
+
+    box := Rectangle {
+        x: 0;
+        y: (root.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        background: root.checked ? Theme.accent : Theme.surface;
+        border-width: 1px;
+        border-color: touch.has-hover || focus.has-focus ? Theme.text : Theme.text-muted;
+
+        if root.checked: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 18;
+            viewbox-height: 18;
+            commands: "M 4 9.5 L 7.5 13 L 14 5.5";
+            stroke: Theme.accent-text;
+            stroke-width: 2px;
+        }
+    }
+
+    label-text := Text {
+        x: box.width + Theme.spacing;
+        height: root.height;
+        text: root.label;
+        color: Theme.text;
+        font-size: Theme.font-size;
+        vertical-alignment: center;
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " ") {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            focus.focus();
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}

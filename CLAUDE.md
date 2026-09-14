@@ -89,6 +89,7 @@ catnap/
 │   ├── icon.rs              # the icon as ARGB pixels (tray IconPixmap, X11 window icon)
 │   ├── timer.rs             # work/break state machine (pure, no UI, no I/O)
 │   ├── hold.rs              # press-and-hold state machine (pure, tested)
+│   ├── autostart.rs         # start at login: the XDG autostart entry (a setting, off by default)
 │   ├── cats.rs              # which clips play: the bundled placeholder or the configured pair
 │   ├── platform/
 │   │   ├── mod.rs           # Platform: what differs by OS (notifications, tray)
@@ -370,6 +371,20 @@ things may differ by OS; everything else is shared.
   install needs one restart; packages install the icon before the app's
   first launch, so users won't hit this. labwc's window switcher looks the
   icon up fresh each time.
+- **Start at login** (`src/autostart.rs`):
+  - It's a setting, off by default, applied at once by a checkbox in the
+    settings window.
+  - It writes or removes `$XDG_CONFIG_HOME/autostart/catnap.desktop` (the
+    XDG autostart spec). Full desktop sessions honor it: GNOME, KDE, XFCE,
+    Cinnamon, MATE, LXQt, Budgie (the dev machine's budgie-session does).
+    Bare compositors (Sway, Hyprland, niri) need their own autostart setup.
+  - The file is the setting. `Hidden=true` or
+    `X-GNOME-Autostart-enabled=false`, set by a desktop's startup-apps
+    tool, count as off.
+  - The entry runs `catnap --autostart`, pointing at the AppImage itself
+    when `$APPIMAGE` is set. The timer starts at once and the settings
+    window stays hidden in the tray. It opens only if no tray icon shows
+    up, or none has within 10 s, so catnap is never unreachable.
 
 ## 6. Build & run
 
@@ -443,14 +458,16 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
 4. **M3 — polish**: stir on click, real assets, one cat per screen
    ("multiple cats" means across monitors, not a cat registry; done on
    layer-shell compositors, X11/GNOME still get one window), and starting
-   at login as a setting the user turns on (never on by default). Dropped on
+   at login as a setting the user turns on (never on by default; done). Dropped on
    2026-09-14: the entry→loop cross-fade (not needed) and the more compact
    settings window (the current one is compact enough).
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary > 7 MB).
 6. **Later / optional**: per-app triggers, stats, and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).
-   Windows and macOS, deferred the same day: Linux first.
+   Windows and macOS, deferred the same day: Linux first. The Rust unwind
+   tables (`.eh_frame`, about 0.6 MB) are kept for now, also that day, so
+   release builds can still be profiled and debugged.
 
 ## 9. How Claude should work in this repo
 

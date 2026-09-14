@@ -2,6 +2,7 @@
 //! Wiring only (CLAUDE.md §3): load the config, show the settings window,
 //! drive the timer, and show the cat window during breaks.
 
+mod autostart;
 mod cats;
 mod config;
 mod hold;
@@ -33,6 +34,9 @@ const TICK: Duration = Duration::from_millis(250);
 /// The Wayland app id (X11 class). Docks match it to `catnap.desktop` for
 /// the icon (`make install-desktop`).
 const APP_ID: &str = "catnap";
+/// After an autostart, how long the settings window waits hidden for the
+/// tray icon before opening anyway.
+const TRAY_WAIT: Duration = Duration::from_secs(10);
 
 struct App {
     config: Config,
@@ -41,6 +45,11 @@ struct App {
     /// The configured clips, loaded at the first break and kept until the
     /// cat settings change (CLAUDE.md §4: load a cat's clips once).
     cat_clips: Option<CatClips>,
+    /// Where the start-at-login entry goes; `None` without a config directory.
+    autostart_path: Option<PathBuf>,
+    /// After an autostart: the settings window stays hidden while the tray
+    /// icon comes up, and opens if it doesn't (or at this deadline).
+    waiting_for_tray: Option<Instant>,
 }
 
 /// What every callback needs: the app state, and weak handles on both
@@ -57,6 +66,7 @@ fn main() -> anyhow::Result<()> {
     // Our own messages at info, dependencies (winit...) only from warn.
     // RUST_LOG overrides this.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("catnap=info,warn")).init();
+    let autostarted = std::env::args().skip(1).any(|argument| argument == autostart::FLAG);
     let screens = platform::install_slint().context("setting up Slint")?;
     slint::set_xdg_app_id(APP_ID).context("setting the app id")?;
     let config_path = config::config_path()?;
@@ -74,16 +84,28 @@ fn main() -> anyhow::Result<()> {
     ui.set_notice_is_warning(!notice.is_empty());
     ui.set_notice(notice.into());
     ui.set_config_path(config_path.display().to_string().into());
+    let autostart_path =
+        autostart::entry_path().map_err(|error| log::warn!("start at login is unavailable: {error}")).ok();
+    ui.set_start_at_login(autostart_path.as_deref().is_some_and(autostart::is_enabled));
     let overlay = Overlay::new(screens)?;
 
     let timer = Timer::new(TimerSettings::from(&config.timer));
-    let app = Rc::new(RefCell::new(App { config, config_path, timer, cat_clips: None }));
+    let app = App { config, config_path, timer, cat_clips: None, autostart_path, waiting_for_tray: None };
+    let app = Rc::new(RefCell::new(app));
     let ctx = Ctx { app, ui: ui.as_weak(), overlay: Rc::downgrade(&overlay), platform };
     wire_timer_buttons(&ui, &ctx);
     wire_settings(&ui, &ctx);
     let dismiss_ctx = ctx.clone();
     overlay.on_dismissed(move || dismiss_ctx.dismiss_break());
     let _ticker = start_ticker(&ctx);
+    if autostarted {
+        // At login: straight to work, in the tray. The settings window opens
+        // only if no tray icon shows up (`show_if_no_tray`).
+        let now = Instant::now();
+        let mut app = ctx.app.borrow_mut();
+        app.timer.start(now);
+        app.waiting_for_tray = Some(now.checked_add(TRAY_WAIT).unwrap_or(now));
+    }
     ctx.after_timer_change(Instant::now());
 
     let close_platform = Rc::clone(&ctx.platform);
@@ -98,7 +120,9 @@ fn main() -> anyhow::Result<()> {
         }
         slint::CloseRequestResponse::HideWindow
     });
-    ui.show()?;
+    if !autostarted {
+        ui.show()?;
+    }
     slint::run_event_loop_until_quit()?;
     Ok(())
 }
@@ -223,6 +247,8 @@ fn wire_settings(ui: &SettingsWindow, ctx: &Ctx) {
             show_clip_status(&ui, which, &text);
         }
     });
+    let autostart_ctx = ctx.clone();
+    ui.on_start_at_login_toggled(move |enabled| autostart_ctx.set_start_at_login(enabled));
     let ctx = ctx.clone();
     ui.on_save(move || ctx.save());
 }
@@ -268,11 +294,51 @@ impl Ctx {
         }
         let controls = tray_state(&app.timer, now);
         self.platform.set_tray_state(&controls);
-        let hint = tray_hint(self.platform.tray_presence());
+        let presence = self.platform.tray_presence();
+        let hint = tray_hint(presence);
         self.with_ui(|ui| {
             refresh_status(ui, &app.timer, now, &controls);
             ui.set_tray_hint(hint);
         });
+        drop(app);
+        self.show_if_no_tray(presence, now);
+    }
+
+    /// After an autostart the settings window stays hidden while the tray
+    /// icon comes up. If there's no tray, or it hasn't come up by the
+    /// deadline, the window opens: catnap must never be unreachable.
+    fn show_if_no_tray(&self, presence: TrayPresence, now: Instant) {
+        let Some(deadline) = self.app.borrow().waiting_for_tray else { return };
+        let give_up = presence == TrayPresence::Absent || (presence == TrayPresence::Starting && now >= deadline);
+        if presence == TrayPresence::Shown || give_up {
+            self.app.borrow_mut().waiting_for_tray = None;
+        }
+        if give_up {
+            log::info!("no tray icon: showing the settings window");
+            self.with_ui(|ui| {
+                if let Err(error) = ui.show() {
+                    log::warn!("cannot show the settings window: {error}");
+                }
+            });
+        }
+    }
+
+    /// The Start at login checkbox: writes or removes the autostart entry at
+    /// once, then shows the entry's real state (unchanged if that failed).
+    fn set_start_at_login(&self, enabled: bool) {
+        let path = self.app.borrow().autostart_path.clone();
+        let (notice, is_warning) = match &path {
+            None => ("Start at login is unavailable: there's no config directory.".to_owned(), true),
+            Some(path) => match autostart::set_enabled(path, enabled) {
+                Ok(()) if enabled => ("catnap will start at login, in the tray.".to_owned(), false),
+                Ok(()) => ("catnap won't start at login.".to_owned(), false),
+                Err(error) => (format!("Start at login not changed: {error}"), true),
+            },
+        };
+        log::info!("{notice}");
+        let actual = path.as_deref().is_some_and(autostart::is_enabled);
+        self.with_ui(|ui| ui.set_start_at_login(actual));
+        self.set_notice(notice, is_warning);
     }
 
     /// Ends the break early: the cat window's hold-to-dismiss button.

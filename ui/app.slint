@@ -2,6 +2,7 @@ import { Theme } from "theme.slint";
 import { PillButton } from "components/pill_button.slint";
 import { NumberField } from "components/number_field.slint";
 import { PathField } from "components/path_field.slint";
+import { CheckBox } from "components/check_box.slint";
 
 export { CatWindow } from "cat.slint";
 
@@ -64,6 +65,9 @@ export component SettingsWindow inherits Window {
     callback pause();
     callback stop();
     callback save();
+    // Start at login: applied at once, not by Save (src/autostart.rs).
+    in-out property <bool> start-at-login;
+    callback start-at-login-toggled(bool);
     // 0 = entry clip, 1 = loop clip.
     callback clip-edited(int, string);
 
@@ -191,6 +195,21 @@ export component SettingsWindow inherits Window {
 
         Text {
             text: "Config file: " + root.config-path;
+            color: Theme.text-muted;
+            font-size: Theme.font-size-small;
+            wrap: word-wrap;
+        }
+
+        SectionTitle { text: "STARTUP"; }
+        CheckBox {
+            label: "Start at login";
+            checked <=> root.start-at-login;
+            toggled(on) => {
+                root.start-at-login-toggled(on);
+            }
+        }
+        Text {
+            text: "At login, catnap starts in the tray with the timer running.";
             color: Theme.text-muted;
             font-size: Theme.font-size-small;
             wrap: word-wrap;
