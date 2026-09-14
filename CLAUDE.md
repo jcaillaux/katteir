@@ -296,9 +296,13 @@ things may differ by OS; everything else is shared.
   under `~/.local/share` for a dev checkout, then rebuilds the user icon
   cache and desktop database. Without them, the dock shows a blank disk. On
   the dev machine the bottom dock is Crystal Dock 2.16, a separate program
-  from `budgie-panel`. A dock that was already running before the first
-  install needs a restart to see the new entry. labwc's window switcher
-  looks the icon up fresh each time.
+  from `budgie-panel`. It picks up a new desktop entry at once (it watches
+  the applications folders), but its Qt icon theme doesn't see an icon
+  added after it started. Its log showed "Could not find icon with name:
+  catnap" until it was restarted. So a dock already running at the first
+  install needs one restart; packages install the icon before the app's
+  first launch, so users won't hit this. labwc's window switcher looks the
+  icon up fresh each time.
 
 ## 6. Build & run
 
