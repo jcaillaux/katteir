@@ -31,8 +31,8 @@ ffmpeg -c:v libvpx-vp9 -i in.webm -an -filter_complex \
 
 ## Build and run
 
-From the repo root, `make run` (or `make run-break` for fullscreen +
-see-through) does all of the below. It builds dav1d into `.deps/` on first
+From the repo root, `make run-spike` (or `make run-spike-break` for
+fullscreen + see-through) does all of the below. It builds dav1d into `.deps/` on first
 use; `make help` lists the targets and variables. By hand:
 
 dav1d is linked statically from a local build (meson, ninja and nasm needed):

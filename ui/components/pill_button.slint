@@ -1,0 +1,52 @@
+import { Theme } from "../theme.slint";
+
+// A plain text button, at least wide enough for its text. No icons: the
+// patched Slint can't decode image files.
+//
+// It takes keyboard focus when clicked, so a number field being edited
+// counts as left (and shows its kept value) before the click is handled.
+// With focus, Space or Enter activates it.
+export component PillButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    callback clicked();
+
+    min-width: max(80px, label.preferred-width + 24px);
+    height: Theme.control-height;
+    border-radius: Theme.radius;
+    opacity: root.enabled ? 1 : 0.45;
+    background: root.primary && root.enabled
+        ? (touch.has-hover ? Theme.accent.brighter(0.1) : Theme.accent)
+        : (touch.has-hover && root.enabled ? Theme.surface-hover : Theme.surface);
+    border-width: focus.has-focus && root.enabled ? 1px : 0px;
+    border-color: Theme.text-muted;
+
+    label := Text {
+        text: root.text;
+        color: root.primary && root.enabled ? Theme.accent-text : Theme.text;
+        font-size: Theme.font-size;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            focus.focus();
+            root.clicked();
+        }
+    }
+}

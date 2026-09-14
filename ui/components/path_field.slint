@@ -1,0 +1,59 @@
+import { Theme } from "../theme.slint";
+
+// A labelled file path, typed in full, with a status line under it that Rust
+// fills in after checking the file. The label sits on the left, like the
+// number fields.
+export component PathField inherits Rectangle {
+    in property <string> label;
+    in-out property <string> path;
+    in property <string> status;
+    // 0 = neutral, 1 = ok, 2 = error.
+    in property <int> status-kind;
+    callback edited(string);
+
+    VerticalLayout {
+        spacing: 2px;
+
+        HorizontalLayout {
+            spacing: Theme.spacing;
+
+            Text {
+                width: Theme.label-width;
+                text: root.label;
+                color: Theme.text;
+                font-size: Theme.font-size;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: Theme.control-height;
+                border-radius: Theme.radius;
+                background: Theme.surface;
+
+                TextInput {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    text <=> root.path;
+                    vertical-alignment: center;
+                    color: Theme.text;
+                    font-size: Theme.font-size-small;
+                    edited => {
+                        root.edited(self.text);
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: Theme.label-width + Theme.spacing;
+
+            Text {
+                text: root.status;
+                color: root.status-kind == 1 ? Theme.ok : root.status-kind == 2 ? Theme.error : Theme.text-muted;
+                font-size: Theme.font-size-small;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

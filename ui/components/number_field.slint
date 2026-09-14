@@ -1,0 +1,97 @@
+import { Theme } from "../theme.slint";
+import { PillButton } from "pill_button.slint";
+
+// A labelled whole number with − and + steppers. Typing is allowed: a typed
+// value within [minimum, maximum] is taken at once, and Enter snaps the text
+// back to the (clamped) value. Fixed widths keep rows aligned.
+export component NumberField inherits Rectangle {
+    in property <string> label;
+    in property <string> unit;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in-out property <int> value;
+
+    function set-clamped(new-value: int) {
+        root.value = max(root.minimum, min(root.maximum, new-value));
+    }
+
+    // Keeps the text in sync when the value changes from the steppers or Rust.
+    changed value => {
+        input.text = root.value;
+    }
+
+    HorizontalLayout {
+        spacing: Theme.spacing;
+
+        Text {
+            width: Theme.label-width;
+            text: root.label;
+            color: Theme.text;
+            font-size: Theme.font-size;
+            vertical-alignment: center;
+        }
+
+        PillButton {
+            min-width: Theme.stepper-width;
+            max-width: Theme.stepper-width;
+            text: "−";
+            enabled: root.value > root.minimum;
+            clicked => {
+                root.set-clamped(root.value - root.step);
+            }
+        }
+
+        Rectangle {
+            width: 64px;
+            height: Theme.control-height;
+            border-radius: Theme.radius;
+            background: Theme.surface;
+
+            input := TextInput {
+                x: 8px;
+                width: parent.width - 16px;
+                text: root.value;
+                input-type: InputType.number;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: Theme.text;
+                font-size: Theme.font-size;
+                edited => {
+                    if (self.text.is-float()) {
+                        root.set-clamped(round(self.text.to-float()));
+                    }
+                }
+                accepted => {
+                    self.text = root.value;
+                }
+                // Leaving the field (Tab, a click on a button or another
+                // field) shows the value actually kept, e.g. after the box
+                // was emptied: an empty box keeps the previous value.
+                changed has-focus => {
+                    if (!self.has-focus) {
+                        self.text = root.value;
+                    }
+                }
+            }
+        }
+
+        PillButton {
+            min-width: Theme.stepper-width;
+            max-width: Theme.stepper-width;
+            text: "+";
+            enabled: root.value < root.maximum;
+            clicked => {
+                root.set-clamped(root.value + root.step);
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.unit;
+            color: Theme.text-muted;
+            font-size: Theme.font-size;
+            vertical-alignment: center;
+        }
+    }
+}

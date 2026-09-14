@@ -1,0 +1,216 @@
+import { Theme } from "theme.slint";
+import { PillButton } from "components/pill_button.slint";
+import { NumberField } from "components/number_field.slint";
+import { PathField } from "components/path_field.slint";
+import { SegmentedSwitch } from "components/segmented_switch.slint";
+
+// Allowed range of a number field, from src/limits.rs.
+export struct IntRange {
+    min: int,
+    max: int,
+}
+
+component SectionTitle inherits Text {
+    color: Theme.text-muted;
+    font-size: Theme.font-size-small;
+    font-weight: 700;
+}
+
+export component SettingsWindow inherits Window {
+    title: "catnap";
+    background: Theme.background;
+    preferred-width: 560px;
+    default-font-size: Theme.font-size;
+
+    // Config values: set from Rust at startup and read back on Save.
+    in-out property <int> work-minutes: 25;
+    in-out property <int> warn-before-secs: 60;
+    in-out property <int> min-break-secs: 30;
+    in-out property <int> dismiss-hold-secs: 5;
+    // 0 = fullscreen, 1 = overlay.
+    in-out property <int> display-mode: 0;
+    in-out property <string> entry-clip;
+    in-out property <string> loop-clip;
+
+    in property <IntRange> work-range: { min: 1, max: 180 };
+    in property <IntRange> warn-range: { min: 0, max: 300 };
+    in property <IntRange> min-break-range: { min: 0, max: 300 };
+    in property <IntRange> hold-range: { min: 1, max: 30 };
+
+    in property <string> entry-clip-status;
+    in property <int> entry-clip-status-kind;
+    in property <string> loop-clip-status;
+    in property <int> loop-clip-status-kind;
+
+    // Timer state, refreshed from Rust.
+    in property <string> status: "Idle";
+    in property <bool> can-start: true;
+    in property <bool> can-pause;
+    in property <bool> can-stop;
+    in property <bool> can-dismiss;
+    in property <string> notice;
+    // Warnings (adjusted values, unusable clips, a failed save) show in red.
+    in property <bool> notice-is-warning;
+    in property <string> config-path;
+
+    callback start();
+    callback pause();
+    callback stop();
+    callback dismiss-break();
+    callback save();
+    // 0 = entry clip, 1 = loop clip.
+    callback clip-edited(int, string);
+
+    VerticalLayout {
+        padding: Theme.padding;
+        spacing: Theme.spacing;
+
+        HorizontalLayout {
+            spacing: Theme.spacing;
+            Text {
+                text: "catnap";
+                color: Theme.text;
+                font-size: Theme.font-size-title;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.status;
+                color: Theme.accent;
+                font-size: Theme.font-size;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Theme.spacing;
+            alignment: LayoutAlignment.start;
+            PillButton {
+                text: "Start";
+                primary: true;
+                enabled: root.can-start;
+                clicked => {
+                    root.start();
+                }
+            }
+            PillButton {
+                text: "Pause";
+                enabled: root.can-pause;
+                clicked => {
+                    root.pause();
+                }
+            }
+            PillButton {
+                text: "Stop";
+                enabled: root.can-stop;
+                clicked => {
+                    root.stop();
+                }
+            }
+            PillButton {
+                text: "Dismiss break";
+                enabled: root.can-dismiss;
+                clicked => {
+                    root.dismiss-break();
+                }
+            }
+        }
+
+        SectionTitle { text: "TIMER"; }
+        NumberField {
+            label: "Work";
+            unit: "min";
+            minimum: root.work-range.min;
+            maximum: root.work-range.max;
+            step: 5;
+            value <=> root.work-minutes;
+        }
+        NumberField {
+            label: "Warn before the break";
+            unit: "s (0 = off)";
+            minimum: root.warn-range.min;
+            maximum: root.warn-range.max;
+            step: 15;
+            value <=> root.warn-before-secs;
+        }
+        NumberField {
+            label: "Minimum break";
+            unit: "s";
+            minimum: root.min-break-range.min;
+            maximum: root.min-break-range.max;
+            step: 15;
+            value <=> root.min-break-secs;
+        }
+
+        SectionTitle { text: "CAT (STACKED-ALPHA AV1 .IVF CLIPS)"; }
+        PathField {
+            label: "Entry clip";
+            path <=> root.entry-clip;
+            status: root.entry-clip-status;
+            status-kind: root.entry-clip-status-kind;
+            edited(path) => {
+                root.clip-edited(0, path);
+            }
+        }
+        PathField {
+            label: "Loop clip";
+            path <=> root.loop-clip;
+            status: root.loop-clip-status;
+            status-kind: root.loop-clip-status-kind;
+            edited(path) => {
+                root.clip-edited(1, path);
+            }
+        }
+
+        SectionTitle { text: "DISPLAY"; }
+        HorizontalLayout {
+            spacing: Theme.spacing;
+            Text {
+                width: Theme.label-width;
+                text: "Mode";
+                color: Theme.text;
+                font-size: Theme.font-size;
+                vertical-alignment: center;
+            }
+            SegmentedSwitch {
+                options: ["Fullscreen", "Overlay"];
+                selected <=> root.display-mode;
+            }
+        }
+        NumberField {
+            label: "Hold to dismiss";
+            unit: "s";
+            minimum: root.hold-range.min;
+            maximum: root.hold-range.max;
+            value <=> root.dismiss-hold-secs;
+        }
+
+        HorizontalLayout {
+            spacing: Theme.spacing;
+            PillButton {
+                text: "Save";
+                primary: true;
+                clicked => {
+                    root.save();
+                }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.notice;
+                color: root.notice-is-warning ? Theme.error : Theme.text-muted;
+                font-size: Theme.font-size-small;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        Text {
+            text: "Config file: " + root.config-path;
+            color: Theme.text-muted;
+            font-size: Theme.font-size-small;
+            wrap: word-wrap;
+        }
+    }
+}

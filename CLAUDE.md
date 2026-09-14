@@ -47,8 +47,8 @@ fully before touching code. When in doubt, ask; do not guess.
 | Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |
 | Tray | `ksni` on Linux (pure Rust SNI/D-Bus), `tray-icon` on macOS/Windows | Do NOT enable `tray-icon`'s Linux backend (pulls GTK/libappindicator). |
 | Notifications | `notify-rust` | |
-| Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/catnap/config.toml` etc. |
-| Logging | `log` + `env_logger` | |
+| Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/catnap/config.toml` etc. (schema in §5). With logging, errors and our own code, M0 is 5.84 MB stripped against 5.19 MB for Slint alone, so ~0.65 MB. |
+| Logging | `log` + `env_logger` | `env_logger` with default features off: no regex, no `jiff` timestamps, no colour. `RUST_LOG` still filters. |
 | Errors | `thiserror` in lib code; `anyhow` only in `main.rs` | |
 | Build/cross | `cargo-zigbuild` for Linux + Windows targets; macOS built and notarized on a Mac | |
 | Packaging | `cargo-packager` (AppImage, .deb, DMG/.app, MSI) | |
@@ -70,7 +70,7 @@ Check versions on crates.io before adding; don't trust remembered version number
 ```
 catnap/
 ├── CLAUDE.md
-├── Makefile                 # dev entry points: make run, run-break, build, test (make help)
+├── Makefile                 # dev entry points: make run, test, clippy, run-spike (make help)
 ├── Cargo.toml
 ├── build.rs                 # slint_build::compile("ui/app.slint")
 ├── ui/
@@ -143,14 +143,50 @@ UI, no filesystem, no clock.
 
 ### Timer state machine (`timer.rs`)
 ```
-Idle ──start──▶ Working(deadline) ──elapsed──▶ Break(started) ──dismissed──▶ Working(new deadline)
-   ▲                 │ pause                                          │ stop
-   └──────stop───────┴───────────────────────────────────────────────┘
+Idle ──start──▶ Working ──deadline──▶ Break ──dismiss (after min_break)──▶ Working
+                 │    ▲                  │
+            pause│    │start (resume)    │
+                 ▼    │                  │
+                Paused                   │
+any state ──stop──▶ Idle ◀───────────────┘
 ```
-- Pure: `fn tick(&mut self, now: Instant) -> Vec<Event>` (bounded, small).
-- Events: `BreakStarted`, `BreakEnded`, `NotifySoon { secs_left }`.
-- Config: `work_minutes` (1..=180), `warn_before_secs` (0..=300),
-  `min_break_secs` (0..=300; dismiss disabled until elapsed), `cat: String`.
+- Pure: `fn tick(&mut self, now: Instant) -> Option<Event>`, at most one
+  event per call and no allocation. Also `start` (which resumes from
+  `Paused`), `pause`, `stop`, and `dismiss(now) -> Result<Event, TimerError>`,
+  which refuses until `min_break_secs` has passed.
+- Events: `BreakStarted`, `BreakEnded` (from `dismiss`), `NotifySoon { secs_left }`.
+  If time jumps past both the warning and the deadline (e.g. after a
+  suspend), only the break starts.
+
+### Config (`config.rs`)
+TOML at `$XDG_CONFIG_HOME/catnap/config.toml` (platform equivalent elsewhere):
+```toml
+[timer]
+work_minutes = 25         # 1..=180
+warn_before_secs = 60     # 0..=300, 0 = no warning
+min_break_secs = 30       # 0..=300, the break can't be dismissed before this
+
+[cat]
+name = "placeholder"      # bundled cat, assets/cats/<name>
+entry_clip = "/abs/path/entry.ivf"   # optional; both clips set = they replace the bundled cat
+loop_clip  = "/abs/path/loop.ivf"
+
+[display]
+mode = "fullscreen"       # "fullscreen" | "overlay"
+dismiss_hold_secs = 5     # 1..=30
+```
+- Missing keys take defaults. Out-of-range numbers, unsafe cat names and
+  relative clip paths are fixed on load (and logged); unknown keys are an
+  error.
+- Parsing, sanitising and serialising are pure. Only `load_file` and
+  `save_file` touch the disk; saving writes a temporary file, then renames it.
+- Clip paths are runtime paths, so they may point at `dev-assets/` (§7). The
+  settings window checks each clip with `video::probe_clip`.
+- **Warn, don't refuse:** a clip that's missing or unusable is still saved
+  (it may be on a drive that isn't mounted yet). The field turns red, the
+  Save notice says why, and the cat window falls back to the bundled cat. The
+  same goes for setting only one of the two clips. Only relative paths are
+  dropped, because catnap can't know what they're relative to.
 
 ### Display modes (`platform::display_mode()` decided at startup, overridable)
 1. **Fullscreen** (default, all platforms): `CatWindow` fullscreen on the
@@ -197,8 +233,10 @@ Only these four things are allowed to differ by OS. Everything else is shared.
 ## 6. Build & run
 
 ```sh
-make run                                   # build dav1d into .deps/ if needed, launch the app (spike for now)
-make run-break                             # same, fullscreen + see-through
+make run                                   # build and launch catnap (make help lists all targets)
+make test && make clippy                   # catnap tests; clippy with warnings as errors
+make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
+make run-spike-break                       # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
 cargo test && cargo clippy --all-targets -- -D warnings
 cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.28
@@ -256,7 +294,11 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
 3. **M2 — platform layer**: Linux tray (`ksni`) + notifications; verify on
    GNOME Wayland, KDE, Sway. Then macOS and Windows tray via `tray-icon`.
 4. **M3 — polish**: cross-fade, stir on click, countdown badge, multiple cats,
-   real assets, autostart option.
+   real assets, autostart option. Also a more compact settings window,
+   **deferred** on 2026-09-14 (the current layout is fine for now): tighter
+   sizing (13 px text, 26 px controls), status in the title row, Timer and
+   Display side by side, clip checks shortened after each field, and no
+   "Dismiss break" button once the cat window exists (M1).
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary > 7 MB).
 6. **Later / optional**: overlay mode with layer-shell on wlroots/KDE,

@@ -1,0 +1,46 @@
+[package]
+name = "catnap"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Every N minutes of work, a cat takes over the screen for a short break."
+
+[dependencies]
+# Pinned exactly: patches/ holds Cargo.toml-patched copies of two Slint crates
+# that must match this version (see patches/README.md).
+slint = { version = "=1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
+# Only to switch a feature on (cargo unifies features): fontconfig is loaded at
+# runtime instead of linked, so building needs no libfontconfig-dev.
+i-slint-common = { version = "=1.17.1", default-features = false, features = ["fontconfig-dlopen"] }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.6"
+directories = "6.0.0"
+log = "0.4.34"
+# No regex, humantime (jiff) or colour: plain log lines, RUST_LOG still works.
+env_logger = { version = "0.11.11", default-features = false }
+thiserror = "2.0.20"
+anyhow = "1.0.104"
+
+[build-dependencies]
+slint-build = "=1.17.1"
+
+# Trimmed Slint (10.1 → 5.2 MB), see patches/README.md.
+[patch.crates-io]
+i-slint-core = { path = "patches/i-slint-core" }
+i-slint-backend-winit = { path = "patches/i-slint-backend-winit" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[lints.rust]
+# No unsafe in M0. src/platform/ and src/video/ may allow it later, per
+# module and with SAFETY comments (CLAUDE.md §4).
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
