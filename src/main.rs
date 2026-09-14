@@ -57,7 +57,7 @@ fn main() -> anyhow::Result<()> {
     // Our own messages at info, dependencies (winit...) only from warn.
     // RUST_LOG overrides this.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("catnap=info,warn")).init();
-    slint::BackendSelector::new().require_opengl_es().select().context("selecting the OpenGL ES renderer")?;
+    platform::install_slint().context("setting up Slint")?;
     slint::set_xdg_app_id(APP_ID).context("setting the app id")?;
     let config_path = config::config_path()?;
     let (config, notice) = load_config(&config_path);

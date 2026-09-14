@@ -67,7 +67,8 @@ impl Overlay {
     /// Creates the (hidden) cat window.
     pub fn new() -> Result<Rc<Self>, OverlayError> {
         let overlay = Rc::new(Self {
-            window: CatWindow::new()?,
+            // On the Wayland overlay layer where the compositor allows it.
+            window: crate::platform::overlay_window(CatWindow::new)?,
             visible: Cell::new(false),
             playback: Rc::new(RefCell::new(Playback::default())),
             frame_timer: slint::Timer::default(),

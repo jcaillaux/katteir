@@ -22,8 +22,8 @@ fully before touching code. When in doubt, ask; do not guess.
   excluding cat assets. This was raised from 5 MB on 2026-09-14: desktop Slint
   is 5.2 MB even with `patches/` applied, and dav1d plus the video code is
   ~1.3 MB (see `spikes/slint-size/`). M1 was 7.20 MB until zbus was patched
-  out of Slint (`patches/README.md`), then 6.32 MB; with M2's notifications
-  and tray it's 6.41 MB. If a dependency adds
+  out of Slint (`patches/README.md`), then 6.32 MB; with M2's notifications,
+  tray and layer-shell cat window it's 6.52 MB. If a dependency adds
   megabytes, justify it in this file or drop it.
 - Behaviour to match (observed from the original extension):
   - Cat sequence = one **entry** clip (the reference clip is ~11 s: the cat
@@ -47,7 +47,7 @@ fully before touching code. When in doubt, ask; do not guess.
 | Language | Rust, stable, edition 2024 | |
 | UI | `slint` `=1.17.1`, **patched** | `backend-winit` + `renderer-femtovg` (OpenGL ES). The cat is drawn from a GL texture, which the software renderer can't show, and a renderer is chosen once per process. **Never Skia.** `i-slint-core` and `i-slint-backend-winit` come from `patches/` via `[patch.crates-io]` (10.1 → 5.2 MB): no complex-script line breaking, no runtime SVG/PNG/JPEG decoding (so no image files in `.slint`; draw icons as `Path`s or pass raw RGBA), a plain title bar on GNOME Wayland, and no XDG portal settings watcher (it pulls in zbus, 0.88 MB; Slint no longer follows the desktop's colour scheme, accent, font or cursor blink, and our theme is fixed anyway). Upgrading Slint means re-applying them (`patches/README.md`). `i-slint-common` is also listed directly, only to enable `fontconfig-dlopen` (fontconfig loaded at runtime, not linked). |
 | GL calls | `glow` | Raw GL for the video shader, only in `src/video/`. ~33 KiB. |
-| Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top` | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland (§5). |
+| Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top`. On Wayland compositors with layer-shell it's a surface of our own on the overlay layer instead | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland, hence layer-shell (§5). catnap's own Slint platform (`src/platform/backend.rs`) wraps the winit backend; `i-slint-backend-winit`, `i-slint-core` and `i-slint-renderer-femtovg` are direct dependencies for it, pinned `=1.17.1`. Layer-shell uses smithay-client-toolkit 0.19.2, wayland-client, glutin and raw-window-handle at the versions winit already pulls in: no new crates, +86 KB. |
 | Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |
 | Tray | Linux: our own StatusNotifierItem + dbusmenu on the D-Bus client below (+54 KB). macOS/Windows: `tray-icon` | Not `ksni`: it and `notify-rust` need zbus, measured on 2026-09-14 at +1.21 MB and 58 crates (catnap 6.32 → 7.53 MB). Do NOT enable `tray-icon`'s Linux backends (GTK/libappindicator, or `ksni`). |
 | Notifications | Linux: `org.freedesktop.Notifications` through our own blocking D-Bus client, `src/platform/linux/` (+35 KB, no dependencies). macOS/Windows: decided in M2 | Not `notify-rust` (zbus, see Tray). |
@@ -92,7 +92,9 @@ catnap/
 │   ├── cats.rs              # which clips play: the bundled placeholder or the configured pair
 │   ├── platform/
 │   │   ├── mod.rs           # Platform: what differs by OS (notifications, tray)
+│   │   ├── backend.rs       # catnap's Slint platform: winit for all, layer-shell for the cat
 │   │   ├── linux/
+│   │   │   ├── layer.rs     # the cat window on the Wayland overlay layer (sctk + EGL + FemtoVG)
 │   │   │   ├── wire.rs      # D-Bus wire format (pure, tested)
 │   │   │   ├── bus.rs       # blocking session-bus connection: auth, Hello, calls, split
 │   │   │   ├── notify.rs    # org.freedesktop.Notifications on a worker thread
@@ -140,8 +142,9 @@ Follow **TigerStyle** and **NASA's Power of Ten** as adapted for Rust:
   `spikes/av1-video/README.md`).
 - **Small functions.** ≤ ~70 lines. One job. If it needs a comment to
   separate sections, split it.
-- **Explicit over clever.** No macros beyond `derive`/`thiserror`. No trait
-  gymnastics. No `unsafe` outside `src/platform/` and `src/video/` (raw GL,
+- **Explicit over clever.** Don't write macros; beyond `derive`/`thiserror`,
+  only use the ones a library requires (`slint::include_modules!`,
+  smithay-client-toolkit's `delegate_*`). No trait gymnastics. No `unsafe` outside `src/platform/` and `src/video/` (raw GL,
   decoder FFI), and each `unsafe` block gets a `// SAFETY:` comment.
 - **Errors are values.** `Result` everywhere in lib code. `unwrap`/`expect`
   only in `main.rs`, tests, or immediately after an assertion proving it safe.
@@ -222,10 +225,28 @@ pill sits bottom centre.
   `spikes/av1-video`. Borderless fullscreen works on both (checked).
 - Always-on-top works on X11 (`_NET_WM_STATE_ABOVE`, checked under XWayland)
   but does nothing on Wayland: winit's `set_window_level` is empty there, and
-  xdg-shell has no such request. The window still covers the screen, but
-  another window can be raised over it. A real Wayland overlay needs
-  layer-shell (labwc, KDE and Sway have it; GNOME doesn't), which winit
-  lacks: that's the deferred custom-backend case.
+  xdg-shell has no such request.
+- **Layer-shell (Wayland):** when the compositor offers `zwlr_layer_shell_v1`
+  (labwc, Sway, KDE, Hyprland, niri; not GNOME), the cat window is a surface
+  on the `overlay` layer instead (`src/platform/linux/layer.rs`). It sits
+  above every window, fullscreen apps and panels included (exclusive zone
+  -1), with no keyboard focus. The compositor picks the output. How it
+  works:
+  - catnap's Slint platform (`backend.rs`) wraps the winit backend and
+    forwards everything, except that `overlay_window(CatWindow::new)` gets
+    a `LayerWindow` adapter.
+  - That adapter has its own Wayland connection (sctk), an EGL context via
+    glutin, and Slint's `FemtoVGOpenGLRenderer` through `OpenGLInterface`.
+    The overlay's rendering notifier (the video) works unchanged.
+  - The connection is polled every 8 ms, only while the cat is shown.
+    Frames are paced by frame callbacks, with the swap interval at 0 so
+    swapping never blocks.
+  - The surface, the EGL context and the GL resources exist only during a
+    break.
+  - Integer output scale only; fractional scaling is untested.
+  - Without layer-shell (GNOME, X11) the cat window is the winit
+    fullscreen window, as before. The choice follows the compositor's
+    globals, never its name. `make test-live` checks the layer-shell setup.
 - Frames are paced by drawing: a frame is taken only once the previous one
   was drawn. The decoder thread and GL textures exist only while the window
   is shown.
@@ -297,8 +318,8 @@ things may differ by OS; everything else is shared.
   (desktop entry, icon theme, XDG autostart). Code never branches on
   `XDG_CURRENT_DESKTOP` or the compositor. The display server only matters
   for the cat window, which has one baseline everywhere (fullscreen,
-  see-through) plus extras where they work (always-on-top on X11;
-  layer-shell on Wayland stays deferred). No XEmbed tray: it's X11-only and
+  see-through) plus extras where they work (always-on-top on X11,
+  layer-shell on Wayland compositors that offer it). No XEmbed tray: it's X11-only and
   obsolete, and every current X11 desktop hosts StatusNotifierItem.
 - **Window icon:** the same pixels through Slint's `icon` property. winit
   sets `_NET_WM_ICON` on X11 and ignores it on Wayland (0.30.13 has no
@@ -392,15 +413,16 @@ tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 7
    (done, both on our own D-Bus client, checked on Budgie/labwc). Still to
    verify on KDE, Sway, and GNOME, which shows no tray without the
    AppIndicator extension. Then macOS and Windows, with `tray-icon`.
-4. **M3 — polish**: cross-fade, stir on click, multiple cats, real assets,
-   autostart option. Also a more compact settings window, **deferred** on
-   2026-09-14 (the current layout is fine for now): tighter sizing (13 px
-   text, 26 px controls), status in the title row, Timer and Cat side by
-   side, and clip checks shortened after each field.
+4. **M3 — polish**: stir on click, real assets, one cat per screen
+   ("multiple cats" means across monitors, not a cat registry), and starting
+   at login as a setting the user turns on (never on by default). Dropped on
+   2026-09-14: the entry→loop cross-fade (not needed) and the more compact
+   settings window (the current one is compact enough).
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary > 7 MB).
-6. **Later / optional**: layer-shell on wlroots/KDE so the cat stays on top
-   on Wayland, per-app triggers, stats.
+6. **Later / optional**: per-app triggers, stats, and a no-OpenGL
+   fallback that draws the video in software (deferred on 2026-09-14).
+   Windows and macOS, deferred the same day: Linux first.
 
 ## 9. How Claude should work in this repo
 

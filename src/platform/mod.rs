@@ -3,8 +3,11 @@
 //! (`linux/`). On other systems notifications are only logged, and there's
 //! no tray, until M2 reaches macOS and Windows.
 
+mod backend;
 #[cfg(target_os = "linux")]
 mod linux;
+
+pub use backend::{install_slint, overlay_window};
 
 /// What the tray menu shows. main sends it on every timer tick; only
 /// changes go further.

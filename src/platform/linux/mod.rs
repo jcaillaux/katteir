@@ -5,6 +5,7 @@
 
 mod bus;
 pub mod instance;
+pub mod layer;
 mod menu;
 pub mod notify;
 pub mod tray;

@@ -24,6 +24,21 @@ log = "0.4.34"
 env_logger = { version = "0.11.11", default-features = false }
 thiserror = "2.0.20"
 anyhow = "1.0.104"
+# catnap's own Slint platform (src/platform/backend.rs): Slint's winit
+# backend, plus the cat window on the Wayland overlay layer. Already in the
+# tree through `slint`, pinned like it; no new features.
+i-slint-backend-winit = { version = "=1.17.1", default-features = false }
+i-slint-core = { version = "=1.17.1", default-features = false }
+i-slint-renderer-femtovg = { version = "=1.17.1", default-features = false, features = ["opengl"] }
+
+# The layer-shell cat window (src/platform/linux/layer.rs). Same versions and
+# features as Slint's winit backend uses: no new crates.
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay-client-toolkit = { version = "=0.19.2", default-features = false }
+wayland-client = "=0.31.15"
+wayland-backend = { version = "=0.3.17", default-features = false, features = ["client_system"] }
+glutin = { version = "=0.32.3", default-features = false, features = ["egl", "wayland"] }
+raw-window-handle = "=0.6.2"
 
 [build-dependencies]
 slint-build = "=1.17.1"

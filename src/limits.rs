@@ -49,3 +49,10 @@ pub const NOTIFICATION_QUEUE_DEPTH: usize = 4;
 pub const TRAY_QUEUE_DEPTH: usize = 16;
 /// Items, property names or events read from one tray menu request.
 pub const MAX_MENU_REQUEST_ITEMS: usize = 64;
+/// How often the layer-shell cat window reads its Wayland connection while
+/// shown.
+pub const LAYER_POLL: Duration = Duration::from_millis(8);
+/// Wayland events kept between two polls; more are dropped (pointer motion).
+pub const MAX_LAYER_EVENTS: usize = 256;
+/// Largest output scale the layer-shell cat window renders at.
+pub const MAX_LAYER_SCALE: u8 = 4;
