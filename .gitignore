@@ -1,0 +1,6 @@
+# Build output, at any depth (the root crate and spikes/*).
+target/
+target-*/
+
+# Local-only test material, never committed. See CLAUDE.md §7.
+/dev-assets/

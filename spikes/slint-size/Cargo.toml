@@ -1,0 +1,30 @@
+# Throwaway spike: how small can Slint (winit + femtovg) get on Linux?
+# Same Slint features and window as spikes/av1-video's `slint_only` binary,
+# plus the repo's patched Slint crates (../../patches/) with trimmed features.
+[package]
+name = "slint-size-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+slint = { version = "=1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
+# Only for reading the rendered frame back to check it (glReadPixels).
+glow = "=0.18.0"
+
+[build-dependencies]
+slint-build = "=1.17.1"
+
+[patch.crates-io]
+i-slint-core = { path = "../../patches/i-slint-core" }
+i-slint-backend-winit = { path = "../../patches/i-slint-backend-winit" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Keep the spike out of any parent workspace.
+[workspace]

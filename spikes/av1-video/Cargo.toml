@@ -1,0 +1,30 @@
+# Throwaway spike: AV1 (dav1d, software) -> OpenGL texture -> Slint.
+# Not part of the catnap crate. See README.md for what it measures.
+[package]
+name = "av1-video-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+slint = { version = "=1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
+dav1d = "=0.11.1"
+glow = "=0.18.0"
+
+[build-dependencies]
+slint-build = "=1.17.1"
+
+# Trimmed Slint (10.1 → 5.2 MB), see ../../patches/README.md.
+[patch.crates-io]
+i-slint-core = { path = "../../patches/i-slint-core" }
+i-slint-backend-winit = { path = "../../patches/i-slint-backend-winit" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Keep the spike out of any parent workspace.
+[workspace]

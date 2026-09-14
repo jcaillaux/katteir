@@ -1,0 +1,26 @@
+// Throwaway spike window: shows one video frame (a borrowed GL texture) over a
+// flat "desktop" colour, so the alpha channel is visible.
+export component SpikeWindow inherits Window {
+    title: "catnap AV1 spike";
+    preferred-width: 1280px;
+    preferred-height: 720px;
+    background: #2b3a4a;
+
+    in property <image> frame;
+    in property <string> stats;
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.frame;
+        image-fit: contain;
+    }
+
+    Text {
+        x: 8px;
+        y: 8px;
+        text: root.stats;
+        color: white;
+        font-size: 14px;
+    }
+}
