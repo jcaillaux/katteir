@@ -210,12 +210,17 @@ Build dependencies: no sudo, no system packages beyond cargo, git, python3
 (venv), a C compiler, curl and pkg-config. `make` builds dav1d from source into
 `.deps/` as a static library, 8-bit only (`meson setup …
 --default-library=static -Dbitdepths=8`), and fetches the tools for that into
-`.deps/` too: meson and ninja from PyPI in a virtualenv, nasm from a
-checksummed tarball. Cargo finds dav1d through `PKG_CONFIG_PATH` plus
+`.deps/` too: meson and ninja from PyPI in a virtualenv (provisional, see
+below), nasm from a checksummed tarball. Cargo finds dav1d through `PKG_CONFIG_PATH` plus
 `SYSTEM_DEPS_DAV1D_LINK=static`, both set by the Makefile. fontconfig is
 loaded at runtime (`i-slint-common/fontconfig-dlopen`), so it needs no dev
 package and isn't linked. For Windows, cross-compile dav1d with
 `zig cc -target x86_64-windows-gnu` as meson's C compiler.
+
+**Deferred: the Python setup for building dav1d.** The Makefile currently
+creates the meson/ninja virtualenv with `python3 -m venv` + `pip`. The plan is
+to set that venv up with `uv` instead. Until that's done, treat the Makefile's
+Python setup as provisional and don't build more on it.
 
 Encode a clip (dev machine only; ffmpeg with libvpx and libsvtav1). Decode
 with `libvpx-vp9`, because ffmpeg's built-in VP9 decoder drops alpha:
