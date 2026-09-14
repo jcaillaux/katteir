@@ -8,6 +8,10 @@ publish = false
 
 [dependencies]
 slint = { version = "=1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
+# Only to switch a feature on (cargo unifies features): Slint's font lookup
+# loads fontconfig at runtime, so neither building nor running needs
+# libfontconfig-dev, and the binary no longer links libfontconfig.
+i-slint-common = { version = "=1.17.1", default-features = false, features = ["fontconfig-dlopen"] }
 dav1d = "=0.11.1"
 glow = "=0.18.0"
 

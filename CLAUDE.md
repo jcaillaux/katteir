@@ -41,7 +41,7 @@ fully before touching code. When in doubt, ask; do not guess.
 | Concern | Choice | Notes |
 |---|---|---|
 | Language | Rust, stable, edition 2024 | |
-| UI | `slint` `=1.17.1`, **patched** | `backend-winit` + `renderer-femtovg` (OpenGL ES). The cat is drawn from a GL texture, which the software renderer can't show, and a renderer is chosen once per process. **Never Skia.** `i-slint-core` and `i-slint-backend-winit` come from `patches/` via `[patch.crates-io]` (10.1 → 5.2 MB): no complex-script line breaking, no runtime SVG/PNG/JPEG decoding (so no image files in `.slint`; draw icons as `Path`s or pass raw RGBA), and a plain title bar on GNOME Wayland. Upgrading Slint means re-applying them (`patches/README.md`). |
+| UI | `slint` `=1.17.1`, **patched** | `backend-winit` + `renderer-femtovg` (OpenGL ES). The cat is drawn from a GL texture, which the software renderer can't show, and a renderer is chosen once per process. **Never Skia.** `i-slint-core` and `i-slint-backend-winit` come from `patches/` via `[patch.crates-io]` (10.1 → 5.2 MB): no complex-script line breaking, no runtime SVG/PNG/JPEG decoding (so no image files in `.slint`; draw icons as `Path`s or pass raw RGBA), and a plain title bar on GNOME Wayland. Upgrading Slint means re-applying them (`patches/README.md`). `i-slint-common` is also listed directly, only to enable `fontconfig-dlopen` (fontconfig loaded at runtime, not linked). |
 | GL calls | `glow` | Raw GL for the video shader, only in `src/video/`. ~33 KiB. |
 | Window/overlay | Slint `Window` props: fullscreen for the cat; `no-frame` + `always-on-top` only in optional overlay mode | |
 | Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |
@@ -70,6 +70,7 @@ Check versions on crates.io before adding; don't trust remembered version number
 ```
 catnap/
 ├── CLAUDE.md
+├── Makefile                 # dev entry points: make run, run-break, build, test (make help)
 ├── Cargo.toml
 ├── build.rs                 # slint_build::compile("ui/app.slint")
 ├── ui/
@@ -196,6 +197,8 @@ Only these four things are allowed to differ by OS. Everything else is shared.
 ## 6. Build & run
 
 ```sh
+make run                                   # build dav1d into .deps/ if needed, launch the app (spike for now)
+make run-break                             # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
 cargo test && cargo clippy --all-targets -- -D warnings
 cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.28
@@ -203,12 +206,16 @@ cargo zigbuild --release --target x86_64-pc-windows-gnu
 cargo packager --release                   # per-platform bundles
 ```
 
-Build dependencies: dav1d is built from source as a static library, 8-bit
-only (`meson setup … --default-library=static -Dbitdepths=8`; needs meson,
-ninja and nasm) and found through `PKG_CONFIG_PATH` plus
-`SYSTEM_DEPS_DAV1D_LINK=static`. For Windows, cross-compile it with
-`zig cc -target x86_64-windows-gnu` as meson's C compiler. On Linux, Slint's
-font stack also needs `libfontconfig-dev`.
+Build dependencies: no sudo, no system packages beyond cargo, git, python3
+(venv), a C compiler, curl and pkg-config. `make` builds dav1d from source into
+`.deps/` as a static library, 8-bit only (`meson setup …
+--default-library=static -Dbitdepths=8`), and fetches the tools for that into
+`.deps/` too: meson and ninja from PyPI in a virtualenv, nasm from a
+checksummed tarball. Cargo finds dav1d through `PKG_CONFIG_PATH` plus
+`SYSTEM_DEPS_DAV1D_LINK=static`, both set by the Makefile. fontconfig is
+loaded at runtime (`i-slint-common/fontconfig-dlopen`), so it needs no dev
+package and isn't linked. For Windows, cross-compile dav1d with
+`zig cc -target x86_64-windows-gnu` as meson's C compiler.
 
 Encode a clip (dev machine only; ffmpeg with libvpx and libsvtav1). Decode
 with `libvpx-vp9`, because ffmpeg's built-in VP9 decoder drops alpha:

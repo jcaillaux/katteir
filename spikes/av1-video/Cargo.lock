@@ -363,6 +363,7 @@ version = "0.0.0"
 dependencies = [
  "dav1d",
  "glow 0.18.0",
+ "i-slint-common",
  "slint",
  "slint-build",
 ]

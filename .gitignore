@@ -2,5 +2,8 @@
 target/
 target-*/
 
+# Locally built native dependencies (dav1d), see Makefile.
+/.deps/
+
 # Local-only test material, never committed. See CLAUDE.md §7.
 /dev-assets/

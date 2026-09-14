@@ -31,6 +31,10 @@ ffmpeg -c:v libvpx-vp9 -i in.webm -an -filter_complex \
 
 ## Build and run
 
+From the repo root, `make run` (or `make run-break` for fullscreen +
+see-through) does all of the below. It builds dav1d into `.deps/` on first
+use; `make help` lists the targets and variables. By hand:
+
 dav1d is linked statically from a local build (meson, ninja and nasm needed):
 
 ```sh
@@ -205,7 +209,10 @@ Tests on the labwc 0.9 session (X11 cases via XWayland):
 
 - The press tests used synthetic input (xdotool/XTEST) and only work for X11
   windows. On native Wayland nothing can inject input without root, so the
-  Wayland hold test is manual.
+  Wayland hold test is manual. It was done on 2026-09-14 with `make run` in
+  the normal Wayland session: the button was held, the log showed `dismiss:
+  hold completed` and the app quit after 41 s of playback, with 786/786
+  frames drawn, 0 late, 0 replaced.
 - What catnap gets on Wayland today: fullscreen + see-through shows the cat
   over the desktop, and the desktop can't be clicked. The window stays above
   normal windows while it has focus, but the user can Alt-Tab away.
@@ -220,9 +227,13 @@ Tests on the labwc 0.9 session (X11 cases via XWayland):
 - dav1d cross-compiles for Windows with meson, using `zig cc -target
   x86_64-windows-gnu` as the C compiler plus nasm. Cross file:
   `[binaries] c = zig cc wrapper, ar = ['zig','ar']`, host `windows/x86_64`.
-- Slint's font stack (`fontique` → `yeslogic-fontconfig-sys`) needs fontconfig
-  dev files on Linux (`libfontconfig-dev`). `RUST_FONTCONFIG_DLOPEN=1` does
-  not work: it changes the sys crate's API and `fontique` won't compile.
+- Slint's font stack (`fontique` → `yeslogic-fontconfig-sys`) links
+  fontconfig by default, which needs `libfontconfig-dev` to build. Instead,
+  `Cargo.toml` enables `i-slint-common/fontconfig-dlopen`, which turns on
+  fontique's `fontconfig-dlopen`. Both fontique and the sys crate then load
+  fontconfig at runtime: no dev package, and no libfontconfig link. Setting
+  `RUST_FONTCONFIG_DLOPEN=1` alone doesn't work: it switches only the sys
+  crate's API, so fontique no longer compiles.
 - `send_data` in the dav1d crate boxes each packet (one small allocation per
   frame), and `get_picture` allocates an `Arc`. Both are small, but they are
   per-frame allocations, which catnap's rules forbid in the animation path.
