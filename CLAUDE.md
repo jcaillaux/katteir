@@ -83,6 +83,7 @@ Check versions on crates.io before adding; don't trust remembered version number
 ```
 katteir/
 ├── CLAUDE.md
+├── README.md                # for people: what Katteir is, install, build, settings, credits
 ├── Makefile                 # dev entry points: make run, test, clippy, deb, run-spike (make help)
 ├── Cargo.toml               # also the app's names and the .deb: [package.metadata.packager] (§5, §6)
 ├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info)
@@ -514,8 +515,8 @@ icon under the app id's name.
   the newest version the binary needs, measured by `objdump -T`.
 - 5.2 MB on 2026-09-15. **Built here, it needs glibc 2.43**, so it only
   installs on distros that new: not Ubuntu 24.04 (2.39) nor Debian 12
-  (2.36). Next: build with `cargo zigbuild` for glibc 2.28, dav1d
-  included.
+  (2.36). A build for glibc 2.28 (`cargo zigbuild`, dav1d included) was
+  deferred on 2026-09-15.
 
 ## 7. Assets policy
 
@@ -563,8 +564,8 @@ icon under the app id's name.
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary, less the embedded
    cat's clips, is over 7 MB). The .deb is done (`make deb`, 2026-09-15)
-   but still needs the build machine's glibc; next, a glibc 2.28 build,
-   then the AppImage.
+   but still needs the build machine's glibc: the glibc 2.28 build was
+   deferred the same day. Then the AppImage.
 6. **Later / optional**: per-app triggers, stats, stir on click (set aside
    on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).
