@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=catnap
-Comment=Every N minutes of work, a cat takes over the screen for a short break
-Exec=catnap
-Icon=catnap
-Terminal=false
-Categories=Utility;
-StartupWMClass=catnap

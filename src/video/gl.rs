@@ -10,7 +10,7 @@
 //! inside Slint's (femtovg's) own GL context.
 //!
 //! Ported from `spikes/av1-video`. Raw GL is unsafe FFI, so this is one of the
-//! two places where catnap allows `unsafe` (CLAUDE.md §4); every block has a
+//! two places where the app allows `unsafe` (CLAUDE.md §4); every block has a
 //! SAFETY comment.
 #![allow(unsafe_code)]
 

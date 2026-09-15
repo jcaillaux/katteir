@@ -41,7 +41,7 @@ accessibility = [
     "dep:accesskit_winit",
 ]
 default = []
-# PATCHED (catnap): new feature, off by default. The XDG portal settings
+# PATCHED (Katteir): new feature, off by default. The XDG portal settings
 # watcher and its zbus/futures dependencies (see build.rs).
 xdg-desktop-settings = ["dep:zbus", "dep:futures"]
 raw-window-handle-06 = ["i-slint-core/raw-window-handle-06"]
@@ -81,7 +81,7 @@ unstable-wgpu-29 = [
     "i-slint-renderer-femtovg?/unstable-wgpu-29",
     "i-slint-renderer-skia?/unstable-wgpu-29",
 ]
-# PATCHED (catnap slint-size spike, V2): removed "winit/wayland-csd-adwaita"
+# PATCHED (Katteir slint-size spike, V2): removed "winit/wayland-csd-adwaita"
 # (title bars drawn with ab_glyph + an embedded Cantarell font).
 wayland = [
     "winit/wayland",
@@ -250,13 +250,13 @@ version = "0.4"
 
 [target.'cfg(not(any(target_family = "windows", target_vendor = "apple", target_arch = "wasm32", target_os = "android")))'.dependencies.futures]
 version = "0.3.31"
-optional = true # PATCHED (catnap): see the xdg-desktop-settings feature
+optional = true # PATCHED (Katteir): see the xdg-desktop-settings feature
 
 [target.'cfg(not(any(target_family = "windows", target_vendor = "apple", target_arch = "wasm32", target_os = "android")))'.dependencies.zbus]
 version = "5.14.0"
 features = ["async-io"]
 default-features = false
-optional = true # PATCHED (catnap): see the xdg-desktop-settings feature
+optional = true # PATCHED (Katteir): see the xdg-desktop-settings feature
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies.accesskit]
 version = "0.24"

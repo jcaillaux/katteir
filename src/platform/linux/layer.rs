@@ -311,7 +311,7 @@ impl LayerShell {
     /// committed so the compositor answers with a configure.
     fn create_overlay(&self, output: &wl_output::WlOutput) -> LayerSurface {
         let surface = self.state.borrow().compositor.create_surface(&self.handle);
-        let layer = self.layers.create_layer_surface(&self.handle, surface, Layer::Overlay, Some("catnap"), Some(output));
+        let layer = self.layers.create_layer_surface(&self.handle, surface, Layer::Overlay, Some(crate::app::DIR), Some(output));
         layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
         // Over panels too. The keyboard stays with the focused app.
         layer.set_exclusive_zone(-1);

@@ -245,7 +245,7 @@ fn session_addresses() -> Vec<Address> {
 }
 
 /// Parses a D-Bus address list ("unix:path=/run/user/1000/bus;tcp:…"),
-/// keeping the Unix socket entries catnap can use.
+/// keeping the Unix socket entries we can use.
 fn parse_addresses(text: &str) -> Vec<Address> {
     text.split(';').take(MAX_DBUS_ADDRESSES).filter_map(parse_address).collect()
 }

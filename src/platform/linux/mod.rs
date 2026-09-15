@@ -1,4 +1,4 @@
-//! Linux: a small blocking D-Bus client of catnap's own (`wire`, `bus`),
+//! Linux: a small blocking D-Bus client of our own (`wire`, `bus`),
 //! for notifications, the tray icon and the single-instance check. ksni and
 //! notify-rust would bring zbus: +1.21 MB, measured on 2026-09-14
 //! (CLAUDE.md §2).

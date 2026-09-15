@@ -1,5 +1,5 @@
 #!/bin/sh
-# Encodes a source clip with an alpha channel into catnap's clip format:
+# Encodes a source clip with an alpha channel into Katteir's clip format:
 # stacked-alpha AV1 in IVF (colour on top, alpha as luma below, 8-bit 4:2:0).
 # Dev machine only; needs ffmpeg with libsvtav1 (and libvpx for VP9 inputs).
 #

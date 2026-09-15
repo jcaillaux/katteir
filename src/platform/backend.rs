@@ -1,4 +1,4 @@
-//! catnap's Slint platform: Slint's own winit backend for every window,
+//! Our Slint platform: Slint's own winit backend for every window,
 //! except the cat windows when the Wayland compositor offers layer-shell
 //! (`linux/layer.rs`). That's decided by what the compositor supports, never
 //! by its name; GNOME and X11 keep one winit window.
@@ -37,13 +37,13 @@ impl Screens {
     }
 }
 
-struct CatnapPlatform {
+struct AppPlatform {
     winit: WinitBackend,
     #[cfg(target_os = "linux")]
     layer_shell: Option<Rc<super::linux::layer::LayerShell>>,
 }
 
-/// Installs catnap's platform. Call once, before any window is created.
+/// Installs our platform. Call once, before any window is created.
 pub fn install_slint() -> Result<Screens, PlatformError> {
     let winit = WinitBackend::builder()
         .with_renderer_name("femtovg")
@@ -55,13 +55,13 @@ pub fn install_slint() -> Result<Screens, PlatformError> {
         #[cfg(target_os = "linux")]
         layer_shell: layer_shell.clone(),
     };
-    let platform = CatnapPlatform {
+    let platform = AppPlatform {
         winit,
         #[cfg(target_os = "linux")]
         layer_shell,
     };
     slint::platform::set_platform(Box::new(platform))
-        .map_err(|error| PlatformError::from(format!("cannot install catnap's Slint platform: {error}")))?;
+        .map_err(|error| PlatformError::from(format!("cannot install our Slint platform: {error}")))?;
     Ok(screens)
 }
 
@@ -78,7 +78,7 @@ pub fn overlay_window<T>(screen: usize, create: impl FnOnce() -> T) -> T {
 // Everything is forwarded to the winit backend, defaults included, so that
 // what it overrides (clipboard, the event loop, quit-on-last-window) keeps
 // working; only `create_window_adapter` may pick a layer-shell window.
-impl Platform for CatnapPlatform {
+impl Platform for AppPlatform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
         let overlay_screen = OVERLAY_NEXT.swap(0, Ordering::Relaxed).checked_sub(1);
         #[cfg(target_os = "linux")]

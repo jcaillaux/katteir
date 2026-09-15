@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["numpy>=2"]
 # ///
-"""Cuts a cat out of footage shot on a plain blue-grey backdrop, for catnap.
+"""Cuts a cat out of footage shot on a plain blue-grey backdrop, for Katteir.
 
 Dev machine only (CLAUDE.md §6); needs ffmpeg with FFV1. The cat is keyed
 out by colour difference: red minus blue is below zero on the blue-grey
@@ -16,7 +16,7 @@ pixels). Writes two lossless clips with alpha (FFV1, BT.709 limited range):
   seconds are blended into the frames just before --loop-start, so the loop
   has no jump: AI footage never comes back to the same frame.
 
-tools/encode.sh then turns each into catnap's stacked-alpha AV1.
+tools/encode.sh then turns each into Katteir's stacked-alpha AV1.
 
 Usage: uv run tools/cutout.py SRC OUT_DIR --entry-start S --loop-start S --loop-end S
 """
@@ -35,7 +35,7 @@ KEY_LOW = 5.0
 KEY_HIGH = 45.0
 # Pixels below this count as backdrop when fitting its colour.
 BACKDROP_MAX = 0.0
-# catnap's clip limit (src/limits.rs, MAX_FRAMES_PER_CLIP).
+# Katteir's clip limit (src/limits.rs, MAX_FRAMES_PER_CLIP).
 MAX_FRAMES_PER_CLIP = 600
 
 
@@ -159,8 +159,8 @@ def frame_plan(args, fps, frame_count):
     assert (plan.loop_end - plan.loop_start) % plan.step == 0, "loop length must be whole loop frames"
     assert plan.fade % plan.step == 0 and 0 < plan.fade <= plan.loop_start, "fade must be whole loop frames"
     assert plan.fade <= plan.loop_end - plan.loop_start, "fade longer than the loop"
-    assert plan.loop_start - plan.entry_start <= MAX_FRAMES_PER_CLIP, "entry over catnap's frame limit"
-    assert (plan.loop_end - plan.loop_start) // plan.step <= MAX_FRAMES_PER_CLIP, "loop over catnap's frame limit"
+    assert plan.loop_start - plan.entry_start <= MAX_FRAMES_PER_CLIP, "entry over Katteir's frame limit"
+    assert (plan.loop_end - plan.loop_start) // plan.step <= MAX_FRAMES_PER_CLIP, "loop over Katteir's frame limit"
     return plan
 
 

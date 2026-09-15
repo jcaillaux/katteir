@@ -1,0 +1,11 @@
+# Template: @NAME@, @ID@ and @EXEC@ are filled in from Cargo.toml
+# ([package.metadata.app]) by the Makefile, and by packages (M4).
+[Desktop Entry]
+Type=Application
+Name=@NAME@
+Comment=Every N minutes of work, a cat takes over the screen for a short break
+Exec=@EXEC@
+Icon=@ID@
+Terminal=false
+Categories=Utility;
+StartupWMClass=@ID@

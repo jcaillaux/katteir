@@ -20,7 +20,7 @@ these edits it's 5.2 MB. Measurements, rendering check and costs are in
 | `i-slint-core` | `parley` without `complex-scripts` | 3.8 MB | Simpler word breaking for Thai, Lao, Khmer, Burmese, CJK |
 | `i-slint-core` | `std` without `svg` and `image-decoders` | ~1.15 MB with the next row | No SVG/PNG/JPEG loading at runtime in `.slint` |
 | `i-slint-backend-winit` | `wayland` without `winit/wayland-csd-adwaita` | (in the row above) | Plain title bar on GNOME Wayland |
-| `i-slint-backend-winit` | XDG portal settings watcher (`xdg_desktop_settings.rs`) only with a new `xdg-desktop-settings` feature, off by default: the `build.rs` cfg alias, and `zbus` and `futures` made optional | 0.88 MB (catnap 7.20 → 6.32 MB) | Slint doesn't follow the desktop's colour scheme, accent colour, font or cursor-blink settings. catnap's UI has its own fixed theme, so only the default font and cursor blink apply |
+| `i-slint-backend-winit` | XDG portal settings watcher (`xdg_desktop_settings.rs`) only with a new `xdg-desktop-settings` feature, off by default: the `build.rs` cfg alias, and `zbus` and `futures` made optional | 0.88 MB (Katteir 7.20 → 6.32 MB) | Slint doesn't follow the desktop's colour scheme, accent colour, font or cursor-blink settings. Katteir's UI has its own fixed theme, so only the default font and cursor blink apply |
 
 ## Upgrading Slint
 

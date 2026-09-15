@@ -1,4 +1,4 @@
-# CLAUDE.md — catnap (working name)
+# CLAUDE.md — Katteir
 
 A tiny cross-platform desktop app: every N minutes of work, a cat takes over the
 screen for a short break. Dismiss it, get back to work. Linux (X11 + Wayland),
@@ -6,6 +6,12 @@ macOS, Windows. One codebase, one small native binary, no runtime, no webview.
 
 This file is the contract between Jonathan and Claude for this repo. Read it
 fully before touching code. When in doubt, ask; do not guess.
+
+The name: *Katt* ("cat" in Swedish and Norwegian) + *Eir*, the Norse goddess
+of healing: a cat that looks after your health. Said "kat-air"; the *-eir*
+spelling keeps that sound in French too, where *-ier* would read "kat-yé".
+It replaced the working name catnap on 2026-09-15. The names are written
+once, in `Cargo.toml` (§5, Names).
 
 ---
 
@@ -50,11 +56,11 @@ fully before touching code. When in doubt, ask; do not guess.
 | Language | Rust, stable, edition 2024 | |
 | UI | `slint` `=1.17.1`, **patched** | `backend-winit` + `renderer-femtovg` (OpenGL ES). The cat is drawn from a GL texture, which the software renderer can't show, and a renderer is chosen once per process. **Never Skia.** `i-slint-core` and `i-slint-backend-winit` come from `patches/` via `[patch.crates-io]` (10.1 → 5.2 MB): no complex-script line breaking, no runtime SVG/PNG/JPEG decoding (so no image files in `.slint`; draw icons as `Path`s or pass raw RGBA), a plain title bar on GNOME Wayland, and no XDG portal settings watcher (it pulls in zbus, 0.88 MB; Slint no longer follows the desktop's colour scheme, accent, font or cursor blink, and our theme is fixed anyway). Upgrading Slint means re-applying them (`patches/README.md`). `i-slint-common` is also listed directly, only to enable `fontconfig-dlopen` (fontconfig loaded at runtime, not linked). |
 | GL calls | `glow` | Raw GL for the video shader, only in `src/video/`. ~33 KiB. |
-| Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top`. On Wayland compositors with layer-shell it's a surface of our own on the overlay layer instead | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland, hence layer-shell (§5). catnap's own Slint platform (`src/platform/backend.rs`) wraps the winit backend; `i-slint-backend-winit`, `i-slint-core` and `i-slint-renderer-femtovg` are direct dependencies for it, pinned `=1.17.1`. Layer-shell uses smithay-client-toolkit 0.19.2, wayland-client, glutin and raw-window-handle at the versions winit already pulls in: no new crates, +86 KB. |
+| Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top`. On Wayland compositors with layer-shell it's a surface of our own on the overlay layer instead | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland, hence layer-shell (§5). Our own Slint platform (`src/platform/backend.rs`) wraps the winit backend; `i-slint-backend-winit`, `i-slint-core` and `i-slint-renderer-femtovg` are direct dependencies for it, pinned `=1.17.1`. Layer-shell uses smithay-client-toolkit 0.19.2, wayland-client, glutin and raw-window-handle at the versions winit already pulls in: no new crates, +86 KB. |
 | Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |
-| Tray | Linux: our own StatusNotifierItem + dbusmenu on the D-Bus client below (+54 KB). macOS/Windows: `tray-icon` | Not `ksni`: it and `notify-rust` need zbus, measured on 2026-09-14 at +1.21 MB and 58 crates (catnap 6.32 → 7.53 MB). Do NOT enable `tray-icon`'s Linux backends (GTK/libappindicator, or `ksni`). |
+| Tray | Linux: our own StatusNotifierItem + dbusmenu on the D-Bus client below (+54 KB). macOS/Windows: `tray-icon` | Not `ksni`: it and `notify-rust` need zbus, measured on 2026-09-14 at +1.21 MB and 58 crates (the app 6.32 → 7.53 MB). Do NOT enable `tray-icon`'s Linux backends (GTK/libappindicator, or `ksni`). |
 | Notifications | Linux: `org.freedesktop.Notifications` through our own blocking D-Bus client, `src/platform/linux/` (+35 KB, no dependencies). macOS/Windows: decided in M2 | Not `notify-rust` (zbus, see Tray). |
-| Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/catnap/config.toml` etc. (schema in §5). With logging, errors and our own code, M0 is 5.84 MB stripped against 5.19 MB for Slint alone, so ~0.65 MB. |
+| Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/katteir/config.toml` etc. (schema in §5). With logging, errors and our own code, M0 is 5.84 MB stripped against 5.19 MB for Slint alone, so ~0.65 MB. |
 | Logging | `log` + `env_logger` | `env_logger` with default features off: no regex, no `jiff` timestamps, no colour. `RUST_LOG` still filters. |
 | Errors | `thiserror` in lib code; `anyhow` only in `main.rs` | |
 | Build/cross | `cargo-zigbuild` for Linux + Windows targets; macOS built and notarized on a Mac | |
@@ -75,11 +81,11 @@ Check versions on crates.io before adding; don't trust remembered version number
 ## 3. Repository layout
 
 ```
-catnap/
+katteir/
 ├── CLAUDE.md
 ├── Makefile                 # dev entry points: make run, test, clippy, run-spike (make help)
-├── Cargo.toml
-├── build.rs                 # slint_build::compile("ui/app.slint")
+├── Cargo.toml               # also the app's names: [package.metadata.app] (§5, Names)
+├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info)
 ├── ui/
 │   ├── app.slint            # exports SettingsWindow, CatWindow
 │   ├── cat.slint            # CatWindow: the overlay (video, countdown badge, hold pill)
@@ -87,22 +93,24 @@ catnap/
 │   └── components/          # small reusable .slint components
 ├── src/
 │   ├── main.rs              # wiring only: build windows, start timer, tray
+│   ├── app.rs               # the app's names (NAME, ID, DIR...), from Cargo.toml via build.rs
 │   ├── config.rs            # Config struct, load/save, defaults, validation
 │   ├── limits.rs            # fixed limits (§4)
 │   ├── icon.rs              # the icon as ARGB pixels (tray IconPixmap, X11 window icon)
 │   ├── timer.rs             # work/break state machine (pure, no UI, no I/O)
 │   ├── hold.rs              # press-and-hold state machine (pure, tested)
 │   ├── autostart.rs         # start at login: the XDG autostart entry (a setting, off by default)
+│   ├── migrate.rs           # one-time move from the working name catnap (config folder, autostart entry)
 │   ├── cats.rs              # which clips play: the bundled ginger cat or the configured pair
 │   ├── platform/
 │   │   ├── mod.rs           # Platform: what differs by OS (notifications, tray)
-│   │   ├── backend.rs       # catnap's Slint platform: winit for all, layer-shell for the cat
+│   │   ├── backend.rs       # our Slint platform: winit for all, layer-shell for the cat
 │   │   ├── linux/
 │   │   │   ├── layer.rs     # the cat window on the Wayland overlay layer (sctk + EGL + FemtoVG)
 │   │   │   ├── wire.rs      # D-Bus wire format (pure, tested)
 │   │   │   ├── bus.rs       # blocking session-bus connection: auth, Hello, calls, split
 │   │   │   ├── notify.rs    # org.freedesktop.Notifications on a worker thread
-│   │   │   ├── instance.rs  # one catnap per session: owns catnap.Instance, or asks it to Show
+│   │   │   ├── instance.rs  # one instance per session: owns the app id on D-Bus, or asks it to Show
 │   │   │   ├── menu.rs      # the tray menu over com.canonical.dbusmenu (pure, tested)
 │   │   │   └── tray.rs      # StatusNotifierItem: registration, calls, state updates
 │   │   ├── macos.rs
@@ -117,9 +125,9 @@ catnap/
 │   ├── cats/<name>/entry.ivf, sleep.ivf, stir.ivf
 │   ├── cats/<name>/cat.toml   # fps, frame counts, size, credits, licence
 │   ├── cats/ginger/         # the bundled cat (CC0, embedded with include_bytes!): AI footage, prompt.txt
-│   ├── catnap.desktop       # desktop entry; make install-desktop fills in Exec
-│   └── icons/catnap-tray.svg  # the icon (CC0): tray ($XDG_RUNTIME_DIR/catnap/) and desktop entry
-│       └── catnap-tray-<px>.argb  # the same at 16/22/32/48 px, rendered by tools/icons.sh
+│   ├── app.desktop          # desktop entry template: make install-desktop fills in names and Exec
+│   └── icons/tray.svg       # the icon (CC0): tray ($XDG_RUNTIME_DIR/katteir/) and desktop entry
+│       └── tray-<px>.argb   # the same at 16/22/32/48 px, rendered by tools/icons.sh
 ├── tools/
 │   ├── cutout.py            # numpy via uv: footage on a plain backdrop → entry + blended loop with alpha (dev-time only)
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
@@ -189,7 +197,7 @@ any state ──stop──▶ Idle ◀──────────────
   Start and pause are ignored during a break.
 
 ### Config (`config.rs`)
-TOML at `$XDG_CONFIG_HOME/catnap/config.toml` (platform equivalent elsewhere):
+TOML at `$XDG_CONFIG_HOME/katteir/config.toml` (platform equivalent elsewhere):
 ```toml
 [timer]
 work_minutes = 25         # 1..=180
@@ -216,7 +224,7 @@ dismiss_hold_secs = 5     # 1..=30, hold time to end a break early
   (it may be on a drive that isn't mounted yet). The field turns red, the
   Save notice says why, and the cat window falls back to the bundled cat. The
   same goes for setting only one of the two clips. Only relative paths are
-  dropped, because catnap can't know what they're relative to.
+  dropped, because the app can't know what they're relative to.
 
 ### Cat window (`overlay.rs`, `ui/cat.slint`)
 Always an overlay (decided 2026-09-14; the opaque fullscreen mode was
@@ -248,7 +256,7 @@ hold-to-dismiss pill sits bottom centre.
   (`src/platform/linux/layer.rs`). It sits above every window, fullscreen
   apps and panels included (exclusive zone -1), with no keyboard focus. How
   it works:
-  - catnap's Slint platform (`backend.rs`) wraps the winit backend and
+  - Our Slint platform (`backend.rs`) wraps the winit backend and
     forwards everything, except that `overlay_window(screen,
     CatWindow::new)` gets a `LayerWindow` adapter bound to that screen.
   - That adapter has its own Wayland connection (sctk), an EGL context via
@@ -342,14 +350,14 @@ things may differ by OS; everything else is shared.
     by `limits.rs`.
   - `make test-live` checks it against the real session bus and
     notification server without showing anything.
-- Each notification replaces catnap's previous one (`replaces_id`), so
+- Each notification replaces our previous one (`replaces_id`), so
   warnings don't pile up. Checked on Budgie Notification Server 10.10.2.
 - **Linux tray:**
   - A `StatusNotifierItem` registered with `org.kde.StatusNotifierWatcher`
     as `org.kde.StatusNotifierItem-<pid>-1`. It registers again whenever the
     watcher's owner changes, for example when the panel restarts.
-  - The icon is `assets/icons/catnap-tray.svg`, written to
-    `$XDG_RUNTIME_DIR/catnap/` and named through `IconName` +
+  - The icon is `assets/icons/tray.svg`, written to
+    `$XDG_RUNTIME_DIR/katteir/` as `<app id>-tray.svg` and named through `IconName` +
     `IconThemePath`, as Chromium's tray icons do (Discord's, for example).
     The ayatana watcher behind Budgie's and Ubuntu's AppIndicator applet
     reads only icon names (`IconPixmap` isn't in its binary). The icon is
@@ -358,7 +366,7 @@ things may differ by OS; everything else is shared.
     `IconPixmap`.
   - Menu (`com.canonical.dbusmenu` at `/MenuBar`): a status line in whole
     minutes (so at most one update a minute), Start/Pause/Stop, Settings…,
-    Quit catnap. On ayatana a left click opens the menu; hosts that send
+    Quit Katteir. On ayatana a left click opens the menu; hosts that send
     `Activate` (KDE) show the settings window instead.
   - Two threads: a reader blocked on the socket, and the tray thread, which
     handles bus messages and state updates from one bounded queue. Menu
@@ -369,9 +377,9 @@ things may differ by OS; everything else is shared.
     and compositors put a newly shown window in front with focus. The
     window's contents are kept; the compositor may place it again.
   - The tray's presence is `Starting`, `Shown` or `Absent`. Plain GNOME
-    has no tray host, so there it's `Absent`, and catnap registers anyway if
+    has no tray host, so there it's `Absent`, and the app registers anyway if
     a host appears later. Only while it's `Shown` does closing the settings
-    window keep catnap running (`run_event_loop_until_quit`, ended by Quit);
+    window keep the app running (`run_event_loop_until_quit`, ended by Quit);
     otherwise closing quits. The window says which applies.
 - **Linux: standards, not desktops.** Everything goes through freedesktop
   standards that are the same on X11 and Wayland: D-Bus (notifications,
@@ -384,16 +392,18 @@ things may differ by OS; everything else is shared.
   obsolete, and every current X11 desktop hosts StatusNotifierItem.
 - **Window icon:** the same pixels through Slint's `icon` property. winit
   sets `_NET_WM_ICON` on X11 and ignores it on Wayland (0.30.13 has no
-  xdg-toplevel-icon); there `catnap.desktop` supplies the icon.
-- **One catnap per session:** at startup, `Platform::start` claims the bus
-  name `catnap.Instance`. If it's taken, it calls `Show` on the owner (which
+  xdg-toplevel-icon); there the desktop entry supplies the icon.
+- **One instance per session:** at startup, `Platform::start` claims the app
+  id, `io.github.jcaillaux.Katteir`, as a bus name. If it's taken, it calls
+  `Show` (at `/Instance`) on the owner (which
   opens its settings window) and returns `None`, and main exits. The owner's
   connection becomes the tray's, so the tray thread answers `Show`. Without
   a session bus there's no check.
 - **Dock icon:** docks find a window's icon through its app id (Wayland) or
   class (X11) and a desktop entry of that name, not through the tray. main
-  sets the app id to `catnap` (`slint::set_xdg_app_id`, before any window is
-  shown), and `make install-desktop` installs `catnap.desktop` and the icon
+  sets the app id to `io.github.jcaillaux.Katteir` (`slint::set_xdg_app_id`,
+  before any window is shown), and `make install-desktop` installs
+  `io.github.jcaillaux.Katteir.desktop` (from `assets/app.desktop`) and the icon
   under `~/.local/share` for a dev checkout, then rebuilds the user icon
   cache and desktop database. Without them, the dock shows a blank disk. On
   the dev machine the bottom dock is Crystal Dock 2.16, a separate program
@@ -407,23 +417,46 @@ things may differ by OS; everything else is shared.
 - **Start at login** (`src/autostart.rs`):
   - It's a setting, off by default, applied at once by a checkbox in the
     settings window.
-  - It writes or removes `$XDG_CONFIG_HOME/autostart/catnap.desktop` (the
+  - It writes or removes `$XDG_CONFIG_HOME/autostart/io.github.jcaillaux.Katteir.desktop` (the
     XDG autostart spec). Full desktop sessions honor it: GNOME, KDE, XFCE,
     Cinnamon, MATE, LXQt, Budgie (the dev machine's budgie-session does).
     Bare compositors (Sway, Hyprland, niri) need their own autostart setup.
   - The file is the setting. `Hidden=true` or
     `X-GNOME-Autostart-enabled=false`, set by a desktop's startup-apps
     tool, count as off.
-  - The entry runs `catnap --autostart`, pointing at the AppImage itself
+  - The entry runs `katteir --autostart`, pointing at the AppImage itself
     when `$APPIMAGE` is set. The timer starts at once and the settings
     window stays hidden in the tray. It opens only if no tray icon shows
-    up, or none has within 10 s, so catnap is never unreachable.
+    up, or none has within 10 s, so the app is never unreachable.
+
+### Names (`app.rs`, `build.rs`, `migrate.rs`)
+The app's names are written once, in `Cargo.toml`, so a rename is two lines
+there plus prose.
+- The crate name, `katteir`, names the binary, the config folder
+  (`$XDG_CONFIG_HOME/katteir/`), the runtime folder, the layer-shell
+  namespace and the log filter (`app::DIR`, `app::LOG_FILTER`).
+- `[package.metadata.app]` has `display-name = "Katteir"`, what people see
+  (window titles, tray, notifications, the menu's Quit), and
+  `app-id = "io.github.jcaillaux.Katteir"`, reverse-DNS as freedesktop and
+  Flathub want: the Wayland app id (X11 class), the desktop entry and icon
+  names, the start-at-login entry, the single-instance D-Bus name.
+- `build.rs` checks both (the id must be a valid D-Bus name) and passes them
+  to Rust as `APP_NAME` and `APP_ID` (`src/app.rs`, or `concat!(env!(…))`
+  where a constant needs one inside it), and to Slint as a generated
+  `AppInfo` global (`import { AppInfo } from "@app-info";`). The Makefile
+  reads them from `Cargo.toml` to fill in the `assets/app.desktop` template.
+  File names carry no name (`assets/icons/tray.svg`).
+- `migrate.rs` moves what the working name left behind, once, at startup:
+  `~/.config/catnap/` becomes `~/.config/katteir/` if the new folder doesn't
+  exist yet, and a `catnap.desktop` start-at-login entry is replaced by the
+  new one (or dropped if a desktop's tool had turned it off). Remove it once
+  no catnap build is left in use.
 
 ## 6. Build & run
 
 ```sh
-make run                                   # build and launch catnap (make help lists all targets)
-make test && make clippy                   # catnap tests; clippy with warnings as errors
+make run                                   # build and launch Katteir (make help lists all targets)
+make test && make clippy                   # Katteir's tests; clippy with warnings as errors
 make test-live                             # the ignored tests: real session bus + notification server
 make install-desktop                       # desktop entry + icon in ~/.local/share (dock icon); make uninstall-desktop
 make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
@@ -475,7 +508,7 @@ uv run tools/cutout.py src.mp4 dev-assets/derived/<name> --entry-start S --loop-
   reference image. EaseMate's terms (updated 2025-06-24) leave generated
   content with the user who made it; we release the clips as CC0. The 30 s
   source stays local in `dev-assets/seedance/`.
-- `assets/icons/` holds icons drawn for catnap, CC0; each file says so.
+- `assets/icons/` holds icons drawn for Katteir, CC0; each file says so.
 - Nothing from zokuzoku's repos is ever committed, embedded or shipped. No
   "neko", "gatekeeper", or their icon style in names or visuals.
 - **One exception, local testing only:** the two original clips

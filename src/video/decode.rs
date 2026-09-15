@@ -48,7 +48,7 @@ impl Decoder {
         );
         let (sender, receiver) = sync_channel(FRAME_QUEUE_DEPTH);
         let thread = std::thread::Builder::new()
-            .name("catnap-decode".into())
+            .name("decode".into())
             .spawn(move || run(&entry, &looped, base_fps, &sender))?;
         Ok(Self { frames: Some(receiver), thread: Some(thread), base_fps })
     }

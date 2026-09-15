@@ -1,5 +1,6 @@
 //! User configuration (CLAUDE.md §5), stored as TOML in
-//! `$XDG_CONFIG_HOME/catnap/config.toml` or the platform equivalent.
+//! `$XDG_CONFIG_HOME/katteir/config.toml` (the crate name) or the platform
+//! equivalent.
 //!
 //! Parsing, sanitising and serialising are pure and tested without the disk;
 //! only `config_path`, `load_file` and `save_file` do I/O.
@@ -15,8 +16,12 @@ use crate::limits;
 /// The bundled cat used when no clips are configured.
 pub const DEFAULT_CAT: &str = "ginger";
 
-const HEADER: &str = "# catnap configuration. Edit freely: values out of range are clamped when\n\
-                      # catnap loads this file. Clip paths must be absolute.\n\n";
+const HEADER: &str = concat!(
+    "# ",
+    env!("APP_NAME"),
+    " configuration. Edit freely: values out of range are clamped on\n",
+    "# load. Clip paths must be absolute.\n\n",
+);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -79,7 +84,7 @@ impl Default for DisplayConfig {
 pub enum ConfigError {
     #[error("config file is {len} bytes, over the {max}-byte limit")]
     TooLarge { len: u64, max: usize },
-    #[error("config file is not a valid catnap config: {0}")]
+    #[error("not a valid config file: {0}")]
     Parse(#[from] toml::de::Error),
     #[error("cannot write the config as TOML: {0}")]
     Serialise(#[from] toml::ser::Error),
@@ -178,9 +183,9 @@ pub fn to_toml(config: &Config) -> Result<String, ConfigError> {
     Ok(format!("{HEADER}{body}"))
 }
 
-/// `$XDG_CONFIG_HOME/catnap/config.toml`, or the platform equivalent.
+/// `$XDG_CONFIG_HOME/katteir/config.toml`, or the platform equivalent.
 pub fn config_path() -> Result<PathBuf, ConfigError> {
-    let dirs = directories::ProjectDirs::from("", "", "catnap").ok_or(ConfigError::NoConfigDir)?;
+    let dirs = directories::ProjectDirs::from("", "", crate::app::DIR).ok_or(ConfigError::NoConfigDir)?;
     Ok(dirs.config_dir().join("config.toml"))
 }
 
@@ -238,7 +243,7 @@ dismiss_hold_secs = 3
     #[test]
     fn defaults_round_trip() {
         let text = to_toml(&Config::default()).expect("serialises");
-        assert!(text.starts_with("# catnap configuration"));
+        assert!(text.starts_with(HEADER));
         let (config, adjusted) = from_toml(&text).expect("parses");
         assert_eq!(config, Config::default());
         assert!(adjusted.is_empty());
@@ -334,7 +339,7 @@ dismiss_hold_secs = 3
 
     #[test]
     fn save_then_load_round_trips_on_disk() {
-        let dir = std::env::temp_dir().join(format!("catnap-config-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("{}-config-test-{}", crate::app::DIR, std::process::id()));
         let path = dir.join("nested").join("config.toml");
         let (config, _) = from_toml(FULL).expect("parses");
         save_file(&path, &config).expect("saves, creating the directories");
@@ -348,7 +353,7 @@ dismiss_hold_secs = 3
 
     #[test]
     fn missing_file_gives_defaults() {
-        let dir = std::env::temp_dir().join(format!("catnap-config-missing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("{}-config-missing-{}", crate::app::DIR, std::process::id()));
         let (config, adjusted) = load_file(&dir.join("config.toml")).expect("a missing file is fine");
         assert_eq!(config, Config::default());
         assert!(adjusted.is_empty());

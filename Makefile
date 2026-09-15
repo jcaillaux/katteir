@@ -1,6 +1,6 @@
-# catnap developer entry points. `make help` lists them.
+# Katteir developer entry points. `make help` lists them.
 #
-# `make run` builds and launches catnap. catnap and the AV1 video spike both
+# `make run` builds and launches the app. It and the AV1 video spike both
 # need dav1d, which is built into .deps/ on first use together with the tools
 # to build it (meson and ninja from PyPI in a virtualenv, nasm from a
 # checksummed source tarball). No sudo needed.
@@ -8,7 +8,11 @@
 # Needs: cargo, a C toolchain (cc), git, python3 with venv, make, curl, tar,
 # sha256sum, pkg-config.
 
-BIN       := target/release/catnap
+# The app's names, read from Cargo.toml: the one place they're written.
+CRATE     := $(shell sed -n 's/^name = "\(.*\)"$$/\1/p' Cargo.toml | head -n 1)
+APP_ID    := $(shell sed -n 's/^app-id = "\(.*\)"$$/\1/p' Cargo.toml)
+APP_NAME  := $(shell sed -n 's/^display-name = "\(.*\)"$$/\1/p' Cargo.toml)
+BIN       := target/release/$(CRATE)
 SPIKE     := spikes/av1-video
 SPIKE_BIN := $(SPIKE)/target/release/av1-video-spike
 DEPS      := $(CURDIR)/.deps
@@ -52,13 +56,13 @@ export SYSTEM_DEPS_DAV1D_LINK := static
 	deps check-tools clean-deps
 
 help:
-	@echo "make run              build and launch catnap"
-	@echo "make build            release build of catnap (builds dav1d first if needed)"
-	@echo "make test             catnap unit tests"
+	@echo "make run              build and launch $(APP_NAME)"
+	@echo "make build            release build of $(APP_NAME) (builds dav1d first if needed)"
+	@echo "make test             $(APP_NAME) unit tests"
 	@echo "make test-live        tests against the real session bus (shows nothing)"
-	@echo "make clippy           clippy on catnap, warnings as errors"
-	@echo "make clean            remove catnap's build output"
-	@echo "make install-desktop  desktop entry + icon in ~/.local/share, so docks show catnap's icon"
+	@echo "make clippy           clippy on $(APP_NAME), warnings as errors"
+	@echo "make clean            remove $(APP_NAME)'s build output"
+	@echo "make install-desktop  desktop entry + icon in ~/.local/share, so docks show $(APP_NAME)'s icon"
 	@echo "make uninstall-desktop  remove them"
 	@echo "make cat-ginger       rebuild the ginger cat's clips from its footage (uv, ffmpeg)"
 	@echo ""
@@ -71,7 +75,7 @@ help:
 	@echo "make clean-deps       remove .deps/"
 	@echo "Spike variables: ENTRY LOOP SECS=$(SECS) THREADS=$(THREADS) SEE_THROUGH ON_TOP FULLSCREEN"
 
-# ---- catnap -----------------------------------------------------------------
+# ---- the app ----------------------------------------------------------------
 
 run: build
 	$(BIN)
@@ -93,17 +97,19 @@ clippy: check-tools $(DAV1D_LIB)
 clean:
 	cargo clean
 
-# Docks and app menus find catnap's icon through a desktop entry named after
-# its app id (catnap). This installs one for this checkout, in your home
-# only; release packages will install it properly (M4).
+# Docks and app menus find the app's icon through a desktop entry named after
+# its app id. This installs one for this checkout, in your home only, from
+# the assets/app.desktop template; release packages will install it
+# properly (M4).
 DATA_HOME    := $(or $(XDG_DATA_HOME),$(HOME)/.local/share)
-DESKTOP_FILE := $(DATA_HOME)/applications/catnap.desktop
-ICON_FILE    := $(DATA_HOME)/icons/hicolor/scalable/apps/catnap.svg
+DESKTOP_FILE := $(DATA_HOME)/applications/$(APP_ID).desktop
+ICON_FILE    := $(DATA_HOME)/icons/hicolor/scalable/apps/$(APP_ID).svg
 
 install-desktop: build
-	install -Dm644 assets/icons/catnap-tray.svg $(ICON_FILE)
+	install -Dm644 assets/icons/tray.svg $(ICON_FILE)
 	mkdir -p $(dir $(DESKTOP_FILE))
-	sed 's|^Exec=.*|Exec=$(CURDIR)/$(BIN)|' assets/catnap.desktop > $(DESKTOP_FILE)
+	sed -e '/^#/d' -e 's|@NAME@|$(APP_NAME)|' -e 's|@ID@|$(APP_ID)|g' -e 's|@EXEC@|$(CURDIR)/$(BIN)|' \
+		assets/app.desktop > $(DESKTOP_FILE)
 	$(MAKE) --no-print-directory refresh-desktop-caches
 	@echo "Installed $(DESKTOP_FILE) and $(ICON_FILE)."
 	@echo "A dock that was already running (Crystal Dock, Plank...) may need a restart to show the icon."

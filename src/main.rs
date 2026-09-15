@@ -1,13 +1,15 @@
-//! catnap: every N minutes of work, a cat takes over the screen for a break.
+//! Katteir: every N minutes of work, a cat takes over the screen for a break.
 //! Wiring only (CLAUDE.md §3): load the config, show the settings window,
 //! drive the timer, and show the cat window during breaks.
 
+mod app;
 mod autostart;
 mod cats;
 mod config;
 mod hold;
 mod icon;
 mod limits;
+mod migrate;
 mod overlay;
 mod platform;
 mod timer;
@@ -31,9 +33,6 @@ slint::include_modules!();
 
 /// How often the timer is polled; its deadlines don't depend on this.
 const TICK: Duration = Duration::from_millis(250);
-/// The Wayland app id (X11 class). Docks match it to `catnap.desktop` for
-/// the icon (`make install-desktop`).
-const APP_ID: &str = "catnap";
 /// After an autostart, how long the settings window waits hidden for the
 /// tray icon before opening anyway.
 const TRAY_WAIT: Duration = Duration::from_secs(10);
@@ -63,18 +62,18 @@ struct Ctx {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Our own messages at info, dependencies (winit...) only from warn.
-    // RUST_LOG overrides this.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("catnap=info,warn")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(app::LOG_FILTER)).init();
+    // Before anything reads the config or the start-at-login entry.
+    migrate::from_catnap();
     let autostarted = std::env::args().skip(1).any(|argument| argument == autostart::FLAG);
     let screens = platform::install_slint().context("setting up Slint")?;
-    slint::set_xdg_app_id(APP_ID).context("setting the app id")?;
+    slint::set_xdg_app_id(app::ID).context("setting the app id")?;
     let config_path = config::config_path()?;
     let (config, notice) = load_config(&config_path);
 
     let ui = SettingsWindow::new()?;
     let Some(platform) = Platform::start(tray_handler(ui.as_weak())) else {
-        log::info!("catnap is already running: its settings window is shown instead");
+        log::info!("{} is already running: its settings window is shown instead", app::NAME);
         return Ok(());
     };
     let platform = Rc::new(platform);
@@ -110,7 +109,7 @@ fn main() -> anyhow::Result<()> {
 
     let close_platform = Rc::clone(&ctx.platform);
     ui.window().on_close_requested(move || {
-        // With a tray icon the window can be opened again, so catnap keeps
+        // With a tray icon the window can be opened again, so the app keeps
         // running; without one, a hidden window would be lost.
         if close_platform.tray_presence() == TrayPresence::Shown {
             return slint::CloseRequestResponse::HideWindow;
@@ -306,7 +305,7 @@ impl Ctx {
 
     /// After an autostart the settings window stays hidden while the tray
     /// icon comes up. If there's no tray, or it hasn't come up by the
-    /// deadline, the window opens: catnap must never be unreachable.
+    /// deadline, the window opens: the app must never be unreachable.
     fn show_if_no_tray(&self, presence: TrayPresence, now: Instant) {
         let Some(deadline) = self.app.borrow().waiting_for_tray else { return };
         let give_up = presence == TrayPresence::Absent || (presence == TrayPresence::Starting && now >= deadline);
@@ -330,8 +329,8 @@ impl Ctx {
         let (notice, is_warning) = match &path {
             None => ("Start at login is unavailable: there's no config directory.".to_owned(), true),
             Some(path) => match autostart::set_enabled(path, enabled) {
-                Ok(()) if enabled => ("catnap will start at login, in the tray.".to_owned(), false),
-                Ok(()) => ("catnap won't start at login.".to_owned(), false),
+                Ok(()) if enabled => (format!("{} will start at login, in the tray.", app::NAME), false),
+                Ok(()) => (format!("{} won't start at login.", app::NAME), false),
                 Err(error) => (format!("Start at login not changed: {error}"), true),
             },
         };

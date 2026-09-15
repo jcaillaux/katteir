@@ -11,7 +11,7 @@ fn main() {
        enable_femtovg_renderer: { any(feature = "renderer-femtovg", feature = "renderer-femtovg-wgpu") },
        enable_accesskit: { all(feature = "accessibility", not(target_arch = "wasm32")) },
        supports_opengl: { all(any(feature = "renderer-skia-opengl", feature = "renderer-femtovg"), not(ios_and_friends)) },
-       // PATCHED (catnap): the XDG portal settings watcher (colour scheme, accent
+       // PATCHED (Katteir): the XDG portal settings watcher (colour scheme, accent
        // colour, font, cursor blink, read over D-Bus) only with the new
        // `xdg-desktop-settings` feature, off by default. It pulls in zbus: 0.88 MB.
        // Upstream it's always on outside Windows, Apple, wasm and Android.

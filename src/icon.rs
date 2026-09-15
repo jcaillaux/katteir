@@ -1,6 +1,6 @@
-//! catnap's icon as pixels, for the places that take pixels instead of an
+//! The app's icon as pixels, for the places that take pixels instead of an
 //! icon name: the tray's `IconPixmap` and the window icon (X11's
-//! `_NET_WM_ICON`). Rendered from `assets/icons/catnap-tray.svg` by
+//! `_NET_WM_ICON`). Rendered from `assets/icons/tray.svg` by
 //! `tools/icons.sh`, because the patched Slint can't decode images.
 
 /// One size of the icon: ARGB32, bytes A, R, G, B per pixel, straight alpha,
@@ -12,10 +12,10 @@ pub struct Pixmap {
 
 /// Smallest first.
 pub const PIXMAPS: [Pixmap; 4] = [
-    Pixmap { size_px: 16, argb: include_bytes!("../assets/icons/catnap-tray-16.argb") },
-    Pixmap { size_px: 22, argb: include_bytes!("../assets/icons/catnap-tray-22.argb") },
-    Pixmap { size_px: 32, argb: include_bytes!("../assets/icons/catnap-tray-32.argb") },
-    Pixmap { size_px: 48, argb: include_bytes!("../assets/icons/catnap-tray-48.argb") },
+    Pixmap { size_px: 16, argb: include_bytes!("../assets/icons/tray-16.argb") },
+    Pixmap { size_px: 22, argb: include_bytes!("../assets/icons/tray-22.argb") },
+    Pixmap { size_px: 32, argb: include_bytes!("../assets/icons/tray-32.argb") },
+    Pixmap { size_px: 48, argb: include_bytes!("../assets/icons/tray-48.argb") },
 ];
 
 /// The largest size as a Slint image, for `Window.icon`.

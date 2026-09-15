@@ -1,5 +1,5 @@
 //! What differs by OS (CLAUDE.md §5): desktop notifications and the tray
-//! icon. On Linux both go through catnap's own small D-Bus client
+//! icon. On Linux both go through our own small D-Bus client
 //! (`linux/`). On other systems notifications are only logged, and there's
 //! no tray, until M2 reaches macOS and Windows.
 
@@ -21,7 +21,7 @@ pub struct TrayState {
     pub can_stop: bool,
 }
 
-/// Whether catnap has a tray icon. A closed settings window can only be
+/// Whether the app has a tray icon. A closed settings window can only be
 /// opened again from it, so closing the window quits unless it's `Shown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayPresence {
@@ -52,7 +52,7 @@ pub struct Platform {
 impl Platform {
     /// Sets up notifications and the tray icon. `on_tray_action` is called
     /// on the tray's own thread; the tray also sends it `ShowSettings` when
-    /// a second catnap starts. `None` if catnap is already running: that one
+    /// a second instance starts. `None` if the app is already running: that one
     /// was asked to show its settings window, and this one should exit.
     /// Nothing else here is fatal.
     pub fn start(on_tray_action: impl Fn(TrayAction) + Send + 'static) -> Option<Self> {
@@ -62,7 +62,7 @@ impl Platform {
                 Ok(linux::instance::Claim::First(bus)) => Some(bus),
                 Ok(linux::instance::Claim::AlreadyRunning) => return None,
                 Err(error) => {
-                    log::warn!("no tray icon, and no check for another catnap: {error}");
+                    log::warn!("no tray icon, and no check for another instance: {error}");
                     None
                 }
             };

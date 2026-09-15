@@ -437,33 +437,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "catnap"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dav1d",
- "directories",
- "env_logger",
- "glow 0.18.0",
- "glutin",
- "i-slint-backend-winit",
- "i-slint-common",
- "i-slint-core",
- "i-slint-renderer-femtovg",
- "log",
- "raw-window-handle",
- "serde",
- "slint",
- "slint-build",
- "smithay-client-toolkit 0.19.2",
- "thiserror 2.0.20",
- "toml",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols",
-]
-
-[[package]]
 name = "cc"
 version = "1.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2196,6 +2169,33 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "katteir"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dav1d",
+ "directories",
+ "env_logger",
+ "glow 0.18.0",
+ "glutin",
+ "i-slint-backend-winit",
+ "i-slint-common",
+ "i-slint-core",
+ "i-slint-renderer-femtovg",
+ "log",
+ "raw-window-handle",
+ "serde",
+ "slint",
+ "slint-build",
+ "smithay-client-toolkit 0.19.2",
+ "thiserror 2.0.20",
+ "toml",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

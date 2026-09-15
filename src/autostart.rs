@@ -1,5 +1,5 @@
 //! Start at login, a setting the user turns on (never on by default): an XDG
-//! autostart entry, `$XDG_CONFIG_HOME/autostart/catnap.desktop`. Full
+//! autostart entry, `$XDG_CONFIG_HOME/autostart/<app id>.desktop`. Full
 //! desktop sessions (GNOME, KDE, XFCE, Cinnamon, MATE, `LXQt`, Budgie) start
 //! the entries there at login; bare compositors (Sway, Hyprland, niri) need
 //! their own autostart setup.
@@ -21,9 +21,9 @@ pub const FLAG: &str = "--autostart";
 pub enum AutostartError {
     #[error("there's no config directory for autostart entries")]
     NoConfigDir,
-    #[error("cannot find catnap's own executable: {0}")]
+    #[error("cannot find our own executable: {0}")]
     Exe(std::io::Error),
-    #[error("catnap's path can't go in a desktop entry: {0:?}")]
+    #[error("our executable's path can't go in a desktop entry: {0:?}")]
     UnusablePath(PathBuf),
     #[error("{path}: {source}")]
     Io { path: PathBuf, source: std::io::Error },
@@ -32,10 +32,10 @@ pub enum AutostartError {
 /// Where the entry lives.
 pub fn entry_path() -> Result<PathBuf, AutostartError> {
     let dirs = directories::BaseDirs::new().ok_or(AutostartError::NoConfigDir)?;
-    Ok(dirs.config_dir().join("autostart").join("catnap.desktop"))
+    Ok(dirs.config_dir().join("autostart").join(crate::app::DESKTOP_FILE))
 }
 
-/// Whether catnap starts at login: the entry exists and isn't turned off.
+/// Whether the app starts at login: the entry exists and isn't turned off.
 pub fn is_enabled(path: &Path) -> bool {
     let Ok(file) = std::fs::File::open(path) else { return false };
     let mut text = String::new();
@@ -83,18 +83,20 @@ fn write_atomically(path: &Path, contents: &str) -> Result<(), AutostartError> {
     std::fs::rename(&temporary, path).map_err(io)
 }
 
-/// The entry for catnap at `exe`.
+/// The entry that starts the app at `exe`.
 fn entry_text(exe: &str) -> String {
     assert!(!exe.contains(['\n', '\r']), "a desktop entry value is one line");
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=catnap\n\
+         Name={name}\n\
          Comment=Every N minutes of work, a cat takes over the screen for a short break\n\
-         Exec={} {FLAG}\n\
-         Icon=catnap\n\
+         Exec={exec} {FLAG}\n\
+         Icon={id}\n\
          Terminal=false\n",
-        exec_argument(exe)
+        name = crate::app::NAME,
+        exec = exec_argument(exe),
+        id = crate::app::ID,
     )
 }
 
@@ -136,20 +138,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_entry_starts_catnap_in_the_tray() {
-        let text = entry_text("/usr/bin/catnap");
+    fn the_entry_starts_the_app_in_the_tray() {
+        let text = entry_text("/usr/bin/app");
         assert!(text.starts_with("[Desktop Entry]\n"));
-        assert!(text.contains("\nExec=/usr/bin/catnap --autostart\n"));
-        assert!(text.contains("\nIcon=catnap\n"));
+        assert!(text.contains("\nExec=/usr/bin/app --autostart\n"));
+        assert!(text.contains(&format!("\nName={}\n", crate::app::NAME)));
+        assert!(text.contains(&format!("\nIcon={}\n", crate::app::ID)));
         assert!(!turned_off(&text));
     }
 
     #[test]
     fn exec_arguments_are_quoted_as_the_spec_asks() {
-        assert_eq!(exec_argument("/usr/bin/catnap"), "/usr/bin/catnap");
-        assert_eq!(exec_argument("/opt/my apps/catnap"), "\"/opt/my apps/catnap\"");
-        assert_eq!(exec_argument("/home/a$b/catnap"), "\"/home/a\\\\$b/catnap\"");
-        assert_eq!(exec_argument("/tmp/100%/catnap"), "/tmp/100%%/catnap");
+        assert_eq!(exec_argument("/usr/bin/app"), "/usr/bin/app");
+        assert_eq!(exec_argument("/opt/my apps/app"), "\"/opt/my apps/app\"");
+        assert_eq!(exec_argument("/home/a$b/app"), "\"/home/a\\\\$b/app\"");
+        assert_eq!(exec_argument("/tmp/100%/app"), "/tmp/100%%/app");
         assert_eq!(exec_argument("/tmp/a\\b"), "\"/tmp/a\\\\\\\\b\"");
     }
 
@@ -161,9 +164,9 @@ mod tests {
     }
 
     fn scratch_entry(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("catnap-autostart-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("{}-autostart-{}-{name}", crate::app::DIR, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        dir.join("autostart").join("catnap.desktop")
+        dir.join("autostart").join(crate::app::DESKTOP_FILE)
     }
 
     #[test]

@@ -1,9 +1,17 @@
 [package]
-name = "catnap"
+name = "katteir"
 version = "0.1.0"
 edition = "2024"
 publish = false
 description = "Every N minutes of work, a cat takes over the screen for a short break."
+
+# The app's names, written only here. build.rs hands them to the code
+# (src/app.rs, and the `@app-info` Slint global), and the Makefile reads them
+# for the desktop entry. The crate name above names the binary and the
+# config folder.
+[package.metadata.app]
+display-name = "Katteir"
+app-id = "io.github.jcaillaux.Katteir"
 
 [dependencies]
 # Pinned exactly: patches/ holds Cargo.toml-patched copies of two Slint crates
@@ -24,7 +32,7 @@ log = "0.4.34"
 env_logger = { version = "0.11.11", default-features = false }
 thiserror = "2.0.20"
 anyhow = "1.0.104"
-# catnap's own Slint platform (src/platform/backend.rs): Slint's winit
+# Our own Slint platform (src/platform/backend.rs): Slint's winit
 # backend, plus the cat window on the Wayland overlay layer. Already in the
 # tree through `slint`, pinned like it; no new features.
 i-slint-backend-winit = { version = "=1.17.1", default-features = false }
@@ -44,6 +52,8 @@ wayland-protocols = { version = "=0.32.13", default-features = false, features =
 
 [build-dependencies]
 slint-build = "=1.17.1"
+# Reads [package.metadata.app] in build.rs: compile time only.
+toml = "1.1.6"
 
 # Trimmed Slint (10.1 → 5.2 MB), see patches/README.md.
 [patch.crates-io]

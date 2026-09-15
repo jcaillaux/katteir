@@ -79,7 +79,7 @@ shared-parley = [
     "dep:icu_normalizer",
 ]
 shared-swash = ["dep:swash"]
-# PATCHED (catnap slint-size spike, V2b): removed "image-decoders" and "svg".
+# PATCHED (Katteir slint-size spike, V2b): removed "image-decoders" and "svg".
 # V2 also removed "i-slint-common/locale-decimal-separator" and
 # "i-slint-common/markdown", but i-slint-core calls into both without a cfg
 # gate (context.rs, styled_text.rs), so that doesn't compile.
@@ -234,7 +234,7 @@ default-features = false
 
 [dependencies.parley]
 version = "0.10.0"
-# PATCHED (catnap slint-size spike): was features = ["complex-scripts"].
+# PATCHED (Katteir slint-size spike): was features = ["complex-scripts"].
 # complex-scripts pulls ICU segmenter dictionaries (Thai, Lao, Khmer, Burmese, CJK).
 features = []
 optional = true

@@ -8,7 +8,7 @@
 //! other owns the write half and handles those messages and the UI's state
 //! updates in order, from one queue. Menu choices go to `on_action`, called
 //! on the tray's thread. The connection is the one that owns
-//! `catnap.Instance` (`instance.rs`), so its `Show` is answered here too.
+//! the app's D-Bus name (`instance.rs`), so its `Show` is answered here too.
 
 use std::cell::RefCell;
 use std::fmt::Write as _;
@@ -42,10 +42,10 @@ const UNKNOWN_PROPERTY: &str = "org.freedesktop.DBus.Error.UnknownProperty";
 const INVALID_ARGS: &str = "org.freedesktop.DBus.Error.InvalidArgs";
 const READ_ONLY: &str = "org.freedesktop.DBus.Error.PropertyReadOnly";
 
-const ICON_NAME: &str = "catnap-tray";
+const ICON_NAME: &str = concat!(env!("APP_ID"), "-tray");
 /// A themed icon from the freedesktop naming spec, if the SVG can't be written.
 const FALLBACK_ICON_NAME: &str = "appointment-soon";
-const ICON_SVG: &[u8] = include_bytes!("../../../assets/icons/catnap-tray.svg");
+const ICON_SVG: &[u8] = include_bytes!("../../../assets/icons/tray.svg");
 
 /// The item's properties and their types: the set Chromium's tray icons
 /// expose, plus `IconPixmap` for hosts that ignore `IconThemePath`.
@@ -114,14 +114,14 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// Starts the tray's thread on `bus`, which owns `catnap.Instance`. The
+    /// Starts the tray's thread on `bus`, which owns the app's D-Bus name. The
     /// thread registers the icon on its own.
     pub fn start(bus: Bus, on_action: Box<dyn Fn(TrayAction) + Send>) -> std::io::Result<Self> {
         let (inputs, queue) = sync_channel(TRAY_QUEUE_DEPTH);
         let presence = Arc::new(Presence::default());
         let (feed, shared) = (inputs.clone(), Arc::clone(&presence));
         let worker = std::thread::Builder::new()
-            .name("catnap-tray".to_owned())
+            .name("tray".to_owned())
             .spawn(move || run(bus, queue, feed, shared, on_action))?;
         Ok(Self { inputs, presence, queued: RefCell::new(None), worker: Some(worker) })
     }
@@ -174,7 +174,7 @@ fn run(
             return;
         }
     };
-    let state = TrayState { status: "catnap".to_owned(), can_start: false, can_pause: false, can_stop: false };
+    let state = TrayState { status: crate::app::NAME.to_owned(), can_start: false, can_pause: false, can_stop: false };
     let mut item = Item { writer, name, icon: Icon::write(), state, revision: 1, register_serial: None, presence, on_action };
     item.register();
     for input in &queue {
@@ -208,7 +208,7 @@ fn set_up(mut bus: Bus, name: &str) -> Result<(BusWriter, BusReader), BusError> 
 }
 
 fn spawn_reader(mut reader: BusReader, feed: SyncSender<Input>) -> std::io::Result<JoinHandle<()>> {
-    std::thread::Builder::new().name("catnap-tray-bus".to_owned()).spawn(move || {
+    std::thread::Builder::new().name("tray-bus".to_owned()).spawn(move || {
         // Ends when the connection closes (the tray thread shuts it down on
         // quit) or the queue is gone.
         loop {
@@ -232,7 +232,7 @@ struct Icon {
 
 impl Icon {
     /// Writes the SVG to a private runtime directory. It's left there on
-    /// exit: another catnap may be showing it, and the directory is emptied
+    /// exit: another instance may be showing it, and the directory is emptied
     /// at logout anyway.
     fn write() -> Self {
         match write_icon_file() {
@@ -247,8 +247,8 @@ impl Icon {
 
 fn write_icon_file() -> std::io::Result<String> {
     let dir = match std::env::var_os("XDG_RUNTIME_DIR") {
-        Some(runtime) => PathBuf::from(runtime).join("catnap"),
-        None => std::env::temp_dir().join(format!("catnap-{}", std::process::id())),
+        Some(runtime) => PathBuf::from(runtime).join(crate::app::DIR),
+        None => std::env::temp_dir().join(format!("{}-{}", crate::app::DIR, std::process::id())),
     };
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join(format!("{ICON_NAME}.svg")), ICON_SVG)?;
@@ -315,7 +315,7 @@ impl Item {
             (Some(PROPERTIES) | None, "Get") => self.get(call),
             (Some(PROPERTIES) | None, "GetAll") => self.get_all(call),
             (Some(PROPERTIES), "Set") => Err((READ_ONLY, "the tray's properties are read-only".to_owned())),
-            // A second catnap started: it exits, this one shows its window.
+            // A second instance started: it exits, this one shows its window.
             (Some(instance::INTERFACE) | None, "Show") if path == instance::PATH => {
                 (self.on_action)(TrayAction::ShowSettings);
                 Ok(EMPTY_REPLY)
@@ -578,7 +578,7 @@ fn read_ints(args: &mut Reader<'_>) -> Result<Vec<i32>, Failure> {
 }
 
 /// One menu event, "isvu": the item, what happened, then data and a
-/// timestamp that catnap doesn't need.
+/// timestamp that we don't need.
 fn read_event<'m>(args: &mut Reader<'m>) -> Result<(i32, &'m str), Failure> {
     let id = args.i32().map_err(invalid)?;
     let event_id = args.str().map_err(invalid)?;
@@ -591,7 +591,8 @@ fn read_event<'m>(args: &mut Reader<'m>) -> Result<(i32, &'m str), Failure> {
 fn write_item_property(writer: &mut Writer, name: &str, state: &TrayState, icon: &Icon) -> bool {
     match name {
         "Category" => variant_str(writer, "ApplicationStatus"),
-        "Id" | "Title" => variant_str(writer, "catnap"),
+        "Id" => variant_str(writer, crate::app::ID),
+        "Title" => variant_str(writer, crate::app::NAME),
         "Status" => variant_str(writer, "Active"),
         "IconName" => variant_str(writer, icon.name),
         "IconThemePath" => variant_str(writer, &icon.dir),
@@ -632,7 +633,7 @@ fn write_item_property(writer: &mut Writer, name: &str, state: &TrayState, icon:
             writer.str("");
             let none = writer.begin_array(8);
             writer.end_array(none);
-            writer.str("catnap");
+            writer.str(crate::app::NAME);
             writer.str(&state.status);
         }
         _ => return false,
@@ -676,8 +677,7 @@ fn introspect(path: &str) -> Answer {
     xml.push_str(DOCTYPE);
     xml.push_str("<node>");
     match path {
-        "/" => xml.push_str(r#"<node name="StatusNotifierItem"/><node name="MenuBar"/><node name="catnap"/>"#),
-        "/catnap" => xml.push_str(r#"<node name="Instance"/>"#),
+        "/" => xml.push_str(r#"<node name="StatusNotifierItem"/><node name="MenuBar"/><node name="Instance"/>"#),
         ITEM_PATH => push_interface(&mut xml, ITEM, ITEM_METHODS, &ITEM_PROPERTIES),
         MENU_PATH => push_interface(&mut xml, MENU, MENU_METHODS, &MENU_PROPERTIES),
         instance::PATH => push_interface(&mut xml, instance::INTERFACE, r#"<method name="Show"/>"#, &[]),
@@ -720,7 +720,7 @@ mod tests {
         let item = Item {
             writer: BusWriter::from_stream(ours),
             name: "org.kde.StatusNotifierItem-1-1".to_owned(),
-            icon: Icon { name: ICON_NAME, dir: "/run/user/1000/catnap".to_owned() },
+            icon: Icon { name: ICON_NAME, dir: "/run/user/1000/tray-icons".to_owned() },
             state: working(),
             revision: 1,
             register_serial: None,
@@ -764,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_catnap_asking_to_show_opens_the_settings() {
+    fn a_second_instance_asking_to_show_opens_the_settings() {
         let (mut item, mut bus, actions) = item();
         item.handle(&call(instance::PATH, instance::INTERFACE, "Show", "", Writer::default()));
         assert_eq!(bus.receive().unwrap().kind(), Kind::MethodReturn);
@@ -828,8 +828,9 @@ mod tests {
             }
         }
         assert!(strings.contains(&("IconName", ICON_NAME)));
-        assert!(strings.contains(&("IconThemePath", "/run/user/1000/catnap")));
-        assert!(strings.contains(&("Id", "catnap")));
+        assert!(strings.contains(&("IconThemePath", "/run/user/1000/tray-icons")));
+        assert!(strings.contains(&("Id", crate::app::ID)));
+        assert!(strings.contains(&("Title", crate::app::NAME)));
         assert!(strings.contains(&("Status", "Active")));
     }
 
@@ -892,7 +893,7 @@ mod tests {
 
     #[test]
     fn introspection_describes_our_objects() {
-        for path in ["/", "/catnap", ITEM_PATH, MENU_PATH, instance::PATH] {
+        for path in ["/", ITEM_PATH, MENU_PATH, instance::PATH] {
             let (signature, body) = introspect(path).unwrap();
             assert_eq!(signature, "s");
             let xml = Reader::new(&body).str().unwrap().to_owned();

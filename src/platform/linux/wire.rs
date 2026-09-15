@@ -1,6 +1,6 @@
 //! D-Bus wire format: whole messages in and out, and the values inside them.
 //! Pure, no I/O. Bad input gives an error, never a panic; only bad values
-//! from catnap itself trip an assertion. Little-endian only: catnap sends
+//! from the app itself trip an assertion. Little-endian only: the app sends
 //! it, and the desktops it targets are little-endian, so a big-endian
 //! message is refused rather than converted.
 
@@ -603,7 +603,7 @@ fn word_at(fixed: &[u8; FIXED_HEADER_BYTES], at: usize) -> Result<usize, WireErr
     usize::try_from(word).map_err(|_| WireError::TooLarge)
 }
 
-/// The header fields catnap reads, as ranges into the message.
+/// The header fields the app reads, as ranges into the message.
 #[derive(Debug, Default)]
 struct Fields {
     path: Option<Range<usize>>,

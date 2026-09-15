@@ -1,6 +1,6 @@
 //! Desktop notifications through `org.freedesktop.Notifications`, sent from
 //! a worker thread so a slow or missing notification server never stalls
-//! the UI. Each notification replaces catnap's previous one.
+//! the UI. Each notification replaces our previous one.
 
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread::JoinHandle;
@@ -13,7 +13,7 @@ const NOTIFICATIONS: &str = "org.freedesktop.Notifications";
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 /// app name, replaces id, icon, summary, body, actions, hints, timeout.
 const NOTIFY_SIGNATURE: &str = "susssasa{sv}i";
-const APP_NAME: &str = "catnap";
+const APP_NAME: &str = crate::app::NAME;
 /// 0 low, 1 normal, 2 critical.
 const URGENCY_NORMAL: u8 = 1;
 /// The server decides how long it stays.
@@ -34,7 +34,7 @@ impl Notifier {
     /// notification, not now.
     pub fn start() -> std::io::Result<Self> {
         let (queue, notes) = sync_channel(NOTIFICATION_QUEUE_DEPTH);
-        let worker = std::thread::Builder::new().name("catnap-notify".to_owned()).spawn(move || run(&notes))?;
+        let worker = std::thread::Builder::new().name("notify".to_owned()).spawn(move || run(&notes))?;
         Ok(Self { queue: Some(queue), worker: Some(worker) })
     }
 
@@ -141,7 +141,7 @@ mod tests {
     fn notify_body_matches_its_signature() {
         let bytes = notify_body("Break in 60 s", "A cat is coming.", 7);
         let mut reader = Reader::new(&bytes);
-        assert_eq!(reader.str(), Ok("catnap"));
+        assert_eq!(reader.str(), Ok(APP_NAME));
         assert_eq!(reader.u32(), Ok(7));
         assert_eq!(reader.str(), Ok(""));
         assert_eq!(reader.str(), Ok("Break in 60 s"));

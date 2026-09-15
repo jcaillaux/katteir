@@ -20,6 +20,8 @@ const SEPARATOR_2: i32 = 8;
 const CHILDREN: [i32; 8] = [STATUS, SEPARATOR_1, START, PAUSE, STOP, SEPARATOR_2, SETTINGS, QUIT];
 /// Every item, the root first.
 const ITEMS: [i32; 9] = [ROOT, STATUS, SEPARATOR_1, START, PAUSE, STOP, SEPARATOR_2, SETTINGS, QUIT];
+/// The last item: "Quit" and the app's name.
+const QUIT_LABEL: &str = concat!("Quit ", env!("APP_NAME"));
 /// One item of a layout: id, properties, children.
 const ITEM_SIGNATURE: &str = "(ia{sv}av)";
 
@@ -54,7 +56,7 @@ fn label(id: i32) -> &'static str {
         PAUSE => "Pause",
         STOP => "Stop",
         SETTINGS => "Settings…",
-        QUIT => "Quit catnap",
+        QUIT => QUIT_LABEL,
         _ => "",
     }
 }
@@ -218,7 +220,7 @@ mod tests {
         assert_eq!(items[1].1, [pair("type", "separator")]);
         assert_eq!(items[2].1, [pair("label", "Start"), pair("enabled", "false")]);
         assert_eq!(items[3].1, [pair("label", "Pause"), pair("enabled", "true")]);
-        assert_eq!(items[7].1, [pair("label", "Quit catnap"), pair("enabled", "true")]);
+        assert_eq!(items[7].1, [pair("label", QUIT_LABEL), pair("enabled", "true")]);
     }
 
     #[test]
@@ -260,7 +262,7 @@ mod tests {
         let bytes = property(QUIT, "label", &working()).unwrap();
         let mut reader = Reader::new(&bytes);
         assert_eq!(reader.signature(), Ok("s"));
-        assert_eq!(reader.str(), Ok("Quit catnap"));
+        assert_eq!(reader.str(), Ok(QUIT_LABEL));
         assert_eq!(property(QUIT, "icon-name", &working()), None);
         assert_eq!(property(99, "label", &working()), None);
     }
