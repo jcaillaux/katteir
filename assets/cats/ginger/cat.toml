@@ -3,12 +3,12 @@
 # which stays local in dev-assets/). Generated on 2026-09-14 with ByteDance
 # Seedance 2.5 on easemate.ai, text to video from prompt.txt, no reference
 # image. EaseMate's terms (updated 2025-06-24) leave generated content with
-# the user who made it; Katteir's contributors dedicate these clips to the
-# public domain.
+# the user who made it. Licensed under CC BY-NC 4.0 (assets/LICENSE.md);
+# until 2026-09-15 these clips were CC0, and copies taken then stay CC0.
 width = 1280
 height = 720
 credits = "Katteir contributors; footage generated with ByteDance Seedance 2.5 on easemate.ai from prompt.txt, cut out by tools/cutout.py"
-license = "CC0-1.0"
+license = "CC-BY-NC-4.0"
 
 [entry]
 file = "entry.ivf"

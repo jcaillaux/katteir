@@ -6,6 +6,9 @@ publish = false
 description = "Every N minutes of work, a cat takes over the screen for a short break."
 # The .deb's Maintainer field.
 authors = ["Jonathan Caillaux"]
+# The code. The cat and the icon are CC BY-NC 4.0 (assets/LICENSE.md), and
+# patches/ keeps Slint's own licence.
+license = "MIT OR Apache-2.0"
 
 # Packaging (cargo-packager 0.11.8, `make deb`). The product name and the
 # identifier are also the app's names, written only here: build.rs hands

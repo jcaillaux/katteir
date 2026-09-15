@@ -84,6 +84,7 @@ Check versions on crates.io before adding; don't trust remembered version number
 katteir/
 ├── CLAUDE.md
 ├── README.md                # for people: what Katteir is, install, build, settings, credits
+├── LICENSE-MIT, LICENSE-APACHE  # the code's licence: MIT OR Apache-2.0 (§7)
 ├── Makefile                 # dev entry points: make run, test, clippy, deb, run-spike (make help)
 ├── Cargo.toml               # also the app's names and the .deb: [package.metadata.packager] (§5, §6)
 ├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info)
@@ -125,9 +126,10 @@ katteir/
 ├── assets/
 │   ├── cats/<name>/entry.ivf, sleep.ivf, stir.ivf
 │   ├── cats/<name>/cat.toml   # fps, frame counts, size, credits, licence
-│   ├── cats/ginger/         # the bundled cat (CC0, embedded with include_bytes!): AI footage, prompt.txt
+│   ├── LICENSE.md           # the assets' licence, CC BY-NC 4.0; its full text beside it
+│   ├── cats/ginger/         # the bundled cat (CC BY-NC 4.0, embedded with include_bytes!): AI footage, prompt.txt
 │   ├── app.desktop          # desktop entry template: make install-desktop fills in names and Exec
-│   └── icons/tray.svg       # the icon (CC0): tray ($XDG_RUNTIME_DIR/katteir/) and desktop entry
+│   └── icons/tray.svg       # the icon (CC BY-NC 4.0): tray ($XDG_RUNTIME_DIR/katteir/) and desktop entry
 │       └── tray-<px>.argb   # the same at 16/22/32/48 px, rendered by tools/icons.sh
 ├── tools/
 │   ├── cutout.py            # numpy via uv: footage on a plain backdrop → entry + blended loop with alpha (dev-time only)
@@ -513,6 +515,7 @@ icon under the app id's name.
   fontconfig, Wayland, X11, xkbcommon), which dpkg can't see. So
   `make deb` writes the Depends list (`target/deb-depends`), with libc at
   the newest version the binary needs, measured by `objdump -T`.
+- The licence files (code and assets, §7) go in `/usr/share/doc/katteir/`.
 - 5.2 MB on 2026-09-15. **Built here, it needs glibc 2.43**, so it only
   installs on distros that new: not Ubuntu 24.04 (2.39) nor Debian 12
   (2.36). A build for glibc 2.28 (`cargo zigbuild`, dav1d included) was
@@ -520,15 +523,30 @@ icon under the app id's name.
 
 ## 7. Assets policy
 
+- **Licences** (decided 2026-09-15):
+  - The code is MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`,
+    `license` in `Cargo.toml`).
+  - Our own assets, the cat and the icon, are CC BY-NC 4.0
+    (`assets/LICENSE.md`, official text in
+    `assets/LICENSE-CC-BY-NC-4.0.txt`). They were CC0 until then, and
+    copies taken before stay CC0. The clips are embedded in the binary, so
+    the binary and its packages fall under the non-commercial terms too.
+  - `patches/` keeps Slint's own licence. Slint is used under its
+    royalty-free licence, which asks for the Made with Slint badge where
+    binaries are offered (it's in the README).
+  - `make deb` puts all these licence files in `/usr/share/doc/katteir/`.
+    Still missing before binaries are shared: the notices of the
+    third-party code in the binary (dav1d is BSD-2-Clause; most crates
+    are MIT or Apache-2.0), e.g. generated with cargo-about.
 - Every cat under `assets/cats/` must have a `cat.toml` with `license` and
   `credits`. Only ship assets we own or that are CC0/CC-BY with attribution
   recorded there. AI-generated clips we produce ourselves are fine.
 - The ginger cat was generated on 2026-09-14 with ByteDance Seedance 2.5 on
   easemate.ai, text to video (`assets/cats/ginger/prompt.txt`), no
   reference image. EaseMate's terms (updated 2025-06-24) leave generated
-  content with the user who made it; we release the clips as CC0. The 30 s
-  source stays local in `dev-assets/seedance/`.
-- `assets/icons/` holds icons drawn for Katteir, CC0; each file says so.
+  content with the user who made it. The 30 s source stays local in
+  `dev-assets/seedance/`.
+- `assets/icons/` holds icons drawn for Katteir; each file says its licence.
 - Nothing from zokuzoku's repos is ever committed, embedded or shipped. No
   "neko", "gatekeeper", or their icon style in names or visuals.
 - **One exception, local testing only:** the two original clips

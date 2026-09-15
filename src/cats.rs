@@ -4,8 +4,8 @@
 use crate::config::Config;
 use crate::video::{Clip, ClipError, decode};
 
-/// The bundled cat: AI footage cut out by tools/cutout.py (CC0, see
-/// assets/cats/ginger/cat.toml).
+/// The bundled cat: AI footage cut out by tools/cutout.py (CC BY-NC 4.0,
+/// see assets/LICENSE.md).
 const BUNDLED_ENTRY: &[u8] = include_bytes!("../assets/cats/ginger/entry.ivf");
 const BUNDLED_SLEEP: &[u8] = include_bytes!("../assets/cats/ginger/sleep.ivf");
 

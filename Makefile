@@ -133,7 +133,8 @@ refresh-desktop-caches:
 
 # The .deb, by cargo-packager (configured in Cargo.toml): the binary in
 # /usr/bin, plus our desktop entry and icon, staged here under the app id's
-# name. Depends lists the libraries the app loads at run time, which dpkg
+# name, and the licence files in /usr/share/doc (cargo-packager doesn't put
+# them in a .deb). Depends lists the libraries the app loads at run time, which dpkg
 # can't see (GL/EGL, fontconfig, Wayland, X11, xkbcommon), and libc at the
 # newest version the binary needs, measured on it.
 PACKAGER_VERSION := 0.11.8
@@ -144,6 +145,8 @@ DEB_DEPENDS := libgcc-s1 libegl1 libgl1 libfontconfig1 libwayland-client0 libway
 deb: build check-packager
 	rm -rf $(DEB_FILES)
 	install -Dm644 assets/icons/tray.svg $(DEB_FILES)/usr/share/icons/hicolor/scalable/apps/$(APP_ID).svg
+	install -Dm644 -t $(DEB_FILES)/usr/share/doc/$(CRATE) LICENSE-MIT LICENSE-APACHE assets/LICENSE-CC-BY-NC-4.0.txt
+	install -Dm644 assets/LICENSE.md $(DEB_FILES)/usr/share/doc/$(CRATE)/LICENSE-ASSETS.md
 	mkdir -p $(DEB_FILES)/usr/share/applications
 	$(call desktop_entry,$(CRATE)) > $(DEB_FILES)/usr/share/applications/$(APP_ID).desktop
 	{ objdump -T $(BIN) | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1 | sed 's/^GLIBC_/libc6 (>= /; s/$$/)/'; \

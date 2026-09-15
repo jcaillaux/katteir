@@ -111,13 +111,26 @@ KDE, GNOME, Sway or plain X11 yet.
 ## Credits
 
 - The cat: footage generated with ByteDance Seedance 2.5, then cut out and
-  encoded for Katteir. It's released under CC0 (`assets/cats/ginger/`).
-- The icon: drawn for Katteir, CC0.
+  encoded for Katteir (`assets/cats/ginger/`).
+- The icon: drawn for Katteir.
+- The AV1 decoder, [dav1d](https://code.videolan.org/videolan/dav1d), is
+  BSD-2-Clause.
 - Inspired by Cat Gatekeeper, a browser extension by zokuzoku. Katteir is an
   independent reimplementation: it shares none of its code or assets.
 
 ## License
 
-The cat clips and the icon are CC0. The code's licence hasn't been chosen
-yet. Slint is used under its royalty-free licence, which asks for the badge
-above.
+- **The code** is licensed under either of [MIT](LICENSE-MIT) or
+  [Apache-2.0](LICENSE-APACHE), at your option.
+- **The cat and the icon** are licensed under
+  [CC BY-NC 4.0](assets/LICENSE.md): you may share and adapt them, with
+  credit, but not commercially. The cat's clips are embedded in the binary,
+  so the binary and its packages may not be sold either. (They were CC0
+  until 2026-09-15; copies taken before then stay CC0.)
+- **`patches/`** holds modified copies of two Slint crates, which keep
+  Slint's own licence. Slint is used under its royalty-free licence, which
+  asks for the badge above.
+
+Unless you say otherwise, any contribution you submit for inclusion in
+Katteir is licensed as above (code: MIT OR Apache-2.0), with no additional
+terms.
