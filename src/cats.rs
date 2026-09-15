@@ -86,8 +86,8 @@ mod tests {
     fn the_bundled_cat_is_a_valid_pair() {
         let clips = bundled().expect("the embedded ginger cat is valid");
         assert_eq!(clips.entry.stacked_size_px(), (1280, 1440));
-        assert_eq!((clips.entry.fps(), clips.looped.fps()), (24, 12));
-        assert_eq!((clips.entry.frame_count(), clips.looped.frame_count()), (424, 112));
+        assert_eq!((clips.entry.fps(), clips.looped.fps()), (24, 24));
+        assert_eq!((clips.entry.frame_count(), clips.looped.frame_count()), (312, 492));
     }
 
     #[test]

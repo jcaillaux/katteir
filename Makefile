@@ -190,16 +190,16 @@ check-about:
 # The ginger cat, from AI footage (assets/cats/ginger/prompt.txt). The source
 # stays local, in the gitignored dev-assets/. The times were measured on it:
 # the entry starts where the rest of the walk covers one screen width (the
-# slide in ui/cat.slint), and the loop is the sleep window whose 2 s seam
-# blend differs least.
+# slide in ui/cat.slint), and the loop goes back and forth between two tops
+# of a breath (14.58 and 24.83 s), where the motion turns anyway.
 GINGER_SRC ?= dev-assets/seedance/cgt-20260915035359-6c5p8.mp4
 GINGER_CUT := dev-assets/derived/ginger
 
 cat-ginger:
-	uv run tools/cutout.py $(GINGER_SRC) $(GINGER_CUT) --entry-start 1.583 --loop-start 19.25 --loop-end 28.583
+	uv run tools/cutout.py $(GINGER_SRC) $(GINGER_CUT) --entry-start 1.583 --loop-start 14.583 --loop-end 24.833 --loop pingpong
 	mkdir -p assets/cats/ginger
 	tools/encode.sh $(GINGER_CUT)/entry.mkv assets/cats/ginger/entry.ivf 24
-	tools/encode.sh $(GINGER_CUT)/sleep.mkv assets/cats/ginger/sleep.ivf 12
+	tools/encode.sh $(GINGER_CUT)/sleep.mkv assets/cats/ginger/sleep.ivf 24
 
 # ---- AV1 video spike --------------------------------------------------------
 

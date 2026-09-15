@@ -30,8 +30,8 @@ once, in `Cargo.toml` (§5, Names).
   ~1.3 MB (see `spikes/slint-size/`). M1 was 7.20 MB until zbus was patched
   out of Slint (`patches/README.md`), then 6.32 MB; with M2's notifications,
   tray and layer-shell cat window it's 6.52 MB. The bundled cat's clips
-  are embedded too (2.47 MB, §5) and don't count against the budget: on
-  2026-09-14 the binary was 9.02 MB with them, 6.55 MB without. If a
+  are embedded too (2.83 MB, §5) and don't count against the budget: on
+  2026-09-15 the binary was 9.39 MB with them, 6.56 MB without. If a
   dependency adds megabytes, justify it in this file or drop it.
 - Behaviour to match (observed from the original extension):
   - Cat sequence = one **entry** clip (the reference clip is ~11 s: the cat
@@ -133,7 +133,7 @@ katteir/
 │       └── tray-<px>.argb   # the same at 16/22/32/48 px, rendered by tools/icons.sh
 ├── tools/
 │   ├── about.toml, notices.hbs  # cargo-about config and template: third-party notices (make notices)
-│   ├── cutout.py            # numpy via uv: footage on a plain backdrop → entry + blended loop with alpha (dev-time only)
+│   ├── cutout.py            # numpy + scipy via uv: footage on a plain backdrop → entry + loop with alpha (dev-time only)
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
 │   └── icons.sh             # ffmpeg + librsvg: the icon SVG → raw ARGB pixels (dev-time only)
 ├── patches/                 # Cargo.toml-patched Slint crates (see patches/README.md)
@@ -314,21 +314,38 @@ hold-to-dismiss pill sits bottom centre.
 - Clip format: AV1, 8-bit 4:2:0, BT.709 limited range, **stacked alpha**. The
   frame height is 2 × the picture height: the top half is colour, and the
   bottom half's luma is alpha (limited range, 16–235). Pictures are 720p
-  (frames 1280×1440). `entry` plays at the footage's own rate and `sleep`
-  at half of it: 24 and 12 fps for the ginger cat, as AI video is 24 fps
-  and no frames are invented to reach 30. 1080p drops frames on a 15 W
+  (frames 1280×1440). Both clips play at the footage's own rate: 24 fps
+  for the ginger cat, as AI video is 24 fps and no frames are invented to
+  reach 30. Its loop ran at 12 fps until 2026-09-15, and the breathing
+  moved in visible steps. 1080p drops frames on a 15 W
   laptop (see the spike README).
-- **The ginger cat** (`assets/cats/ginger/`, 2.5 MB): 30 s of AI footage
-  (§7) made into a 17.7 s entry (424 frames) and a 9.3 s loop (112). The
-  cut-out is a colour key, red minus blue: the blue-grey backdrop is below
-  zero and ginger fur far above it, so no matting model is needed. Soft
-  edges lose the backdrop's tint (a smooth fit of the frame's own backdrop).
-  AI footage never comes back to the same frame (the fur keeps changing
-  slowly), so a plain cut loop would jump: the loop's last 2 s are blended
-  into the frames just before its start, and its window (19.25 to 28.58 s)
-  is where that blend differs least. The contact shadow is lost. It's the
-  bundled cat, embedded with `include_bytes!`. It replaced M1's
-  placeholder, a flat blob drawn by ffmpeg, on 2026-09-14.
+- **The ginger cat** (`assets/cats/ginger/`, 2.8 MB): 30 s of AI footage
+  (§7) made by `tools/cutout.py` into a 13 s entry (312 frames) and a
+  20.5 s loop (492).
+  - The cut-out is a colour key, red minus blue: the blue-grey backdrop is
+    below zero and ginger fur far above it, so no matting model is needed.
+    The key's edge is harder than the footage's and showed stair steps
+    once enlarged 1.5×, so the matte is pulled in by half a pixel and
+    feathered (σ 0.7 px).
+  - Edge pixels take the colour of the fur just inside them, not the
+    backdrop's tint, which had left a pale rim. The invisible area around
+    the cat is filled with smooth colour (8×8 blocks before were costly
+    to encode).
+  - The loop plays forward from 14.58 s to 24.83 s, then back. Both ends
+    are tops of a breath (the back rises and falls about 12 px every 4.5 to
+    5 s), where the motion turns anyway. AI footage never comes back to the
+    same frame; the first loop (until 2026-09-15) blended its last 2 s into
+    its start, and during that blend the fur looked smeared. Nothing is
+    blended now. `cutout.py --loop blend` still makes that kind.
+  - Encoded at crf 30 with a keyframe every 10 s. Measured on the visible
+    cat only, quality is steady from frame to frame at any crf. A keyframe
+    every 2 s instead cost 40 % more at the same quality.
+  - Known flaws: the shadowed pale fur under the chin, in the walk, is
+    partly see-through. In shadow it has the backdrop's colour and
+    smoothness, so no rule tells it from the shadowed backdrop between the
+    legs; a matting model would. The contact shadow is lost.
+  - It's the bundled cat, embedded with `include_bytes!`. It replaced M1's
+    placeholder, a flat blob drawn by ffmpeg, on 2026-09-14.
 - `cat.toml`: `fps`, per-clip `frames`, `width`, `height`, `credits`,
   `license`. For now it only records credits and licence: `cats.rs` checks
   the two IVF headers against each other (same size, one rate a multiple of
@@ -356,6 +373,11 @@ things may differ by OS; everything else is shared.
     notification server without showing anything.
 - Each notification replaces our previous one (`replaces_id`), so
   warnings don't pile up. Checked on Budgie Notification Server 10.10.2.
+- Notifications name their icon: `app_icon` is the app id, the icon the
+  package (or `make install-desktop`) installs in the icon theme, and the
+  `desktop-entry` hint names our desktop entry, from which servers take the
+  icon and the app's name. Until 2026-09-15 they sent neither, and showed
+  no icon.
 - **Linux tray:**
   - A `StatusNotifierItem` registered with `org.kde.StatusNotifierWatcher`
     as `org.kde.StatusNotifierItem-<pid>-1`. It registers again whenever the
@@ -494,15 +516,15 @@ Python setup as provisional and don't build more on it.
 Encode a clip (dev machine only; ffmpeg with libvpx and libsvtav1). Decode
 with `libvpx-vp9`, because ffmpeg's built-in VP9 decoder drops alpha:
 ```sh
-tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 720p, crf 38
+tools/encode.sh in.webm assets/cats/<name>/entry.ivf 30   # stacked-alpha AV1, 720p, crf 30, a keyframe every 10 s
 ```
 
 Cut a cat out of footage on a plain backdrop (dev machine only; uv and
-ffmpeg with FFV1). The script declares numpy inline, so uv fetches it into
-its own cache: no venv to keep. `make cat-ginger` runs this and the two
-encodes with the ginger cat's measured times:
+ffmpeg with FFV1). The script declares numpy and scipy inline, so uv
+fetches them into its own cache: no venv to keep. `make cat-ginger` runs
+this and the two encodes with the ginger cat's measured times:
 ```sh
-uv run tools/cutout.py src.mp4 dev-assets/derived/<name> --entry-start S --loop-start S --loop-end S
+uv run tools/cutout.py src.mp4 dev-assets/derived/<name> --entry-start S --loop-start S --loop-end S [--loop pingpong|blend]
 ```
 
 **The .deb** (`make deb`, configured under `[package.metadata.packager]`

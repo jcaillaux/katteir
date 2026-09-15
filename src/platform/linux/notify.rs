@@ -113,11 +113,12 @@ fn notify_call(bus: &mut Bus, note: &Note, replaces_id: u32) -> Result<u32, BusE
 }
 
 fn notify_body(summary: &str, body: &str, replaces_id: u32) -> Vec<u8> {
-    let mut writer = Writer::with_capacity(128 + summary.len() + body.len());
+    let mut writer = Writer::with_capacity(192 + summary.len() + body.len());
     writer.str(APP_NAME);
     writer.u32(replaces_id);
-    // No icon.
-    writer.str("");
+    // The icon by name: the one the package (or `make install-desktop`)
+    // installs in the icon theme, named after the app id.
+    writer.str(crate::app::ID);
     writer.str(summary);
     writer.str(body);
     let actions = writer.begin_array(4);
@@ -127,6 +128,12 @@ fn notify_body(summary: &str, body: &str, replaces_id: u32) -> Vec<u8> {
     writer.str("urgency");
     writer.variant("y");
     writer.u8(URGENCY_NORMAL);
+    // Our desktop entry (its name without ".desktop"): servers take the
+    // icon and the app's name from it, and group our notifications.
+    writer.begin_struct();
+    writer.str("desktop-entry");
+    writer.variant("s");
+    writer.str(crate::app::ID);
     writer.end_array(hints);
     writer.i32(EXPIRE_DEFAULT);
     writer.into_bytes()
@@ -143,7 +150,7 @@ mod tests {
         let mut reader = Reader::new(&bytes);
         assert_eq!(reader.str(), Ok(APP_NAME));
         assert_eq!(reader.u32(), Ok(7));
-        assert_eq!(reader.str(), Ok(""));
+        assert_eq!(reader.str(), Ok(crate::app::ID));
         assert_eq!(reader.str(), Ok("Break in 60 s"));
         assert_eq!(reader.str(), Ok("A cat is coming."));
         let actions = reader.array(4).unwrap();
@@ -153,6 +160,11 @@ mod tests {
         assert_eq!(reader.str(), Ok("urgency"));
         assert_eq!(reader.signature(), Ok("y"));
         assert_eq!(reader.u8(), Ok(URGENCY_NORMAL));
+        assert_eq!(reader.more(hints), Ok(true));
+        reader.begin_struct().unwrap();
+        assert_eq!(reader.str(), Ok("desktop-entry"));
+        assert_eq!(reader.signature(), Ok("s"));
+        assert_eq!(reader.str(), Ok(crate::app::ID));
         assert_eq!(reader.more(hints), Ok(false));
         assert_eq!(reader.i32(), Ok(EXPIRE_DEFAULT));
         assert_eq!(reader.u8(), Err(WireError::Truncated));

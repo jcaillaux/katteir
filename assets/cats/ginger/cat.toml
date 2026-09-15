@@ -13,9 +13,10 @@ license = "CC-BY-NC-4.0"
 [entry]
 file = "entry.ivf"
 fps = 24
-frames = 424
+frames = 312
 
+# Forward, then back: no frame is blended (CLAUDE.md §5).
 [sleep]
 file = "sleep.ivf"
-fps = 12
-frames = 112
+fps = 24
+frames = 492
