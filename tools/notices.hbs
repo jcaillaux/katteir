@@ -1,0 +1,28 @@
+Third-party notices
+===================
+
+This program contains the open source software listed below, under the
+licences shown. Where a crate offers a choice of licences, the one it's
+listed under is the one it's used under.
+
+The source code of each crate is available from crates.io
+(https://crates.io/crates/<name>). Two Slint crates, i-slint-core and
+i-slint-backend-winit, are used with modifications: their modified source
+is in the program's repository, in patches/.
+
+Licences:
+{{#each overview}}
+  {{name}}: {{count}}
+{{/each}}
+{{#each licenses}}
+
+------------------------------------------------------------------------
+{{name}}
+
+Used by:
+{{#each used_by}}
+  {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

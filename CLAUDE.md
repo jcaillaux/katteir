@@ -64,7 +64,7 @@ once, in `Cargo.toml` (§5, Names).
 | Logging | `log` + `env_logger` | `env_logger` with default features off: no regex, no `jiff` timestamps, no colour. `RUST_LOG` still filters. |
 | Errors | `thiserror` in lib code; `anyhow` only in `main.rs` | |
 | Build/cross | `cargo-zigbuild` for Linux + Windows targets; macOS built and notarized on a Mac | |
-| Packaging | `cargo-packager` 0.11.8: the .deb now; AppImage, DMG/.app, NSIS/MSI later | `cargo install cargo-packager --version 0.11.8 --locked` (`make deb` checks for it). It doesn't build the binary and doesn't find dependencies (§6). No rpm. |
+| Packaging | `cargo-packager` 0.11.8: the .deb now; AppImage, DMG/.app, NSIS/MSI later | `cargo install cargo-packager --version 0.11.8 --locked` (`make deb` checks for it). It doesn't build the binary and doesn't find dependencies (§6). No rpm. Third-party notices: `cargo-about` 0.9.2 (`cargo install cargo-about --version 0.9.2 --locked --features cli`, §7). |
 
 Release profile (`Cargo.toml`):
 ```toml
@@ -132,6 +132,7 @@ katteir/
 │   └── icons/tray.svg       # the icon (CC BY-NC 4.0): tray ($XDG_RUNTIME_DIR/katteir/) and desktop entry
 │       └── tray-<px>.argb   # the same at 16/22/32/48 px, rendered by tools/icons.sh
 ├── tools/
+│   ├── about.toml, notices.hbs  # cargo-about config and template: third-party notices (make notices)
 │   ├── cutout.py            # numpy via uv: footage on a plain backdrop → entry + blended loop with alpha (dev-time only)
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
 │   └── icons.sh             # ffmpeg + librsvg: the icon SVG → raw ARGB pixels (dev-time only)
@@ -464,6 +465,7 @@ make test && make clippy                   # Katteir's tests; clippy with warnin
 make test-live                             # the ignored tests: real session bus + notification server
 make install-desktop                       # desktop entry + icon in ~/.local/share (dock icon); make uninstall-desktop
 make deb                                   # Debian package in target/release (cargo-packager, see below)
+make notices                               # third-party licence notices in target/ (cargo-about, §7)
 make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
 make run-spike-break                       # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
@@ -515,7 +517,8 @@ icon under the app id's name.
   fontconfig, Wayland, X11, xkbcommon), which dpkg can't see. So
   `make deb` writes the Depends list (`target/deb-depends`), with libc at
   the newest version the binary needs, measured by `objdump -T`.
-- The licence files (code and assets, §7) go in `/usr/share/doc/katteir/`.
+- The licence files (code, assets, third-party notices; §7) go in
+  `/usr/share/doc/katteir/`.
 - 5.2 MB on 2026-09-15. **Built here, it needs glibc 2.43**, so it only
   installs on distros that new: not Ubuntu 24.04 (2.39) nor Debian 12
   (2.36). A build for glibc 2.28 (`cargo zigbuild`, dav1d included) was
@@ -535,9 +538,21 @@ icon under the app id's name.
     royalty-free licence, which asks for the Made with Slint badge where
     binaries are offered (it's in the README).
   - `make deb` puts all these licence files in `/usr/share/doc/katteir/`.
-    Still missing before binaries are shared: the notices of the
-    third-party code in the binary (dav1d is BSD-2-Clause; most crates
-    are MIT or Apache-2.0), e.g. generated with cargo-about.
+- **Third-party notices** (`make notices`): `target/THIRD-PARTY-NOTICES.txt`,
+  which `make deb` ships with the licence files.
+  - cargo-about 0.9.2 lists the crates. Its config, `tools/about.toml`,
+    ranks the accepted licences in order of preference, so a crate
+    offering several is listed under the first. It keeps to Linux x86-64
+    run-time dependencies and leaves our own crate out. The template is
+    `tools/notices.hbs`.
+  - The Makefile then appends what cargo-about can't give: Slint's
+    royalty-free licence, with the Slint crates as `cargo tree` finds
+    them, and dav1d's `COPYING` (C, built from source).
+  - cargo-about 0.9.2 drops `LicenseRef-*` texts even when clarified. Its
+    filter (`generate.rs`) skips a clarified file that names the
+    LicenseRef instead of keeping it. Its warnings about that are
+    silenced (`-L error`). After an upgrade, run it without `-L error`,
+    and drop the Makefile's Slint part if it's fixed.
 - Every cat under `assets/cats/` must have a `cat.toml` with `license` and
   `credits`. Only ship assets we own or that are CC0/CC-BY with attribution
   recorded there. AI-generated clips we produce ourselves are fine.
@@ -583,7 +598,12 @@ icon under the app id's name.
    size budget check in CI (fail if the stripped binary, less the embedded
    cat's clips, is over 7 MB). The .deb is done (`make deb`, 2026-09-15)
    but still needs the build machine's glibc: the glibc 2.28 build was
-   deferred the same day. Then the AppImage.
+   deferred the same day. Then the AppImage. Packages will be hosted as
+   GitHub Releases, built by a workflow (later). A package needs the glibc
+   it was built against or newer (apt enforces it through `Depends`), so
+   the build machine sets the baseline. GitHub's `ubuntu-22.04` runner
+   (glibc 2.35: Ubuntu 22.04+, Debian 12+, Fedora 36+) may be enough,
+   and the release notes must state the baseline.
 6. **Later / optional**: per-app triggers, stats, stir on click (set aside
    on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).

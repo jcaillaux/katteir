@@ -51,7 +51,8 @@ export PKG_CONFIG_PATH := $(DAV1D)/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_C
 export SYSTEM_DEPS_DAV1D_LINK := static
 
 .PHONY: help run build test clippy clean \
-	test-live install-desktop uninstall-desktop refresh-desktop-caches deb check-packager cat-ginger \
+	test-live install-desktop uninstall-desktop refresh-desktop-caches deb check-packager \
+	notices check-about cat-ginger \
 	run-spike run-spike-break build-spike test-spike clean-spike \
 	deps check-tools clean-deps
 
@@ -65,6 +66,7 @@ help:
 	@echo "make install-desktop  desktop entry + icon in ~/.local/share, so docks show $(APP_NAME)'s icon"
 	@echo "make uninstall-desktop  remove them"
 	@echo "make deb              Debian package in target/release (cargo-packager $(PACKAGER_VERSION))"
+	@echo "make notices          third-party licence notices in $(NOTICES) (cargo-about $(ABOUT_VERSION))"
 	@echo "make cat-ginger       rebuild the ginger cat's clips from its footage (uv, ffmpeg)"
 	@echo ""
 	@echo "make run-spike        build and launch the AV1 video spike (1280x720 window)"
@@ -142,10 +144,10 @@ DEB_FILES   := target/deb-files
 DEB_DEPENDS := libgcc-s1 libegl1 libgl1 libfontconfig1 libwayland-client0 libwayland-egl1 \
 	libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxrender1 libxkbcommon0 libxkbcommon-x11-0
 
-deb: build check-packager
+deb: build check-packager notices
 	rm -rf $(DEB_FILES)
 	install -Dm644 assets/icons/tray.svg $(DEB_FILES)/usr/share/icons/hicolor/scalable/apps/$(APP_ID).svg
-	install -Dm644 -t $(DEB_FILES)/usr/share/doc/$(CRATE) LICENSE-MIT LICENSE-APACHE assets/LICENSE-CC-BY-NC-4.0.txt
+	install -Dm644 -t $(DEB_FILES)/usr/share/doc/$(CRATE) LICENSE-MIT LICENSE-APACHE assets/LICENSE-CC-BY-NC-4.0.txt $(NOTICES)
 	install -Dm644 assets/LICENSE.md $(DEB_FILES)/usr/share/doc/$(CRATE)/LICENSE-ASSETS.md
 	mkdir -p $(DEB_FILES)/usr/share/applications
 	$(call desktop_entry,$(CRATE)) > $(DEB_FILES)/usr/share/applications/$(APP_ID).desktop
@@ -157,6 +159,31 @@ deb: build check-packager
 check-packager:
 	@cargo packager --version 2>/dev/null | grep -qx 'cargo-packager $(PACKAGER_VERSION)' || \
 		{ echo "needs cargo-packager $(PACKAGER_VERSION): cargo install cargo-packager --version $(PACKAGER_VERSION) --locked"; exit 1; }
+
+# The licences of the third-party code in the binary: every crate, from
+# cargo-about (tools/about.toml, tools/notices.hbs; --fail stops on a
+# licence it can't place). Then what cargo-about leaves out: Slint's
+# royalty-free licence, with the Slint crates as cargo tree finds them
+# (cargo-about 0.9.2 drops LicenseRef texts, see tools/about.toml, and
+# -L error silences its warnings about them), and dav1d, C built from
+# source, which cargo-about can't see.
+ABOUT_VERSION := 0.9.2
+NOTICES       := target/THIRD-PARTY-NOTICES.txt
+RULE          := ------------------------------------------------------------------------
+
+notices: check-about $(DAV1D_LIB)
+	cargo about -L error generate --fail --offline -c tools/about.toml tools/notices.hbs -o $(NOTICES)
+	{ printf '\n%s\nLicenseRef-Slint-Royalty-free-2.0 (Slint)\n\nUsed by:\n' '$(RULE)'; \
+		cargo tree --offline -e normal --target x86_64-unknown-linux-gnu --prefix none --format '{p}|{l}' \
+			| grep 'LicenseRef-Slint-Royalty-free' | cut -d'|' -f1 \
+			| sed 's/ (.*//; s/ v\([0-9]\)/ \1/; s/^/  /' | sort -u; \
+		printf '\n'; cat patches/i-slint-core/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md; \
+		printf '\n%s\ndav1d %s (the AV1 decoder, C, built from source)\n\n' '$(RULE)' '$(DAV1D_TAG)'; \
+		cat $(DAV1D_SRC)/COPYING; } >> $(NOTICES)
+
+check-about:
+	@cargo about --version 2>/dev/null | grep -qx 'cargo-about $(ABOUT_VERSION)' || \
+		{ echo "needs cargo-about $(ABOUT_VERSION): cargo install cargo-about --version $(ABOUT_VERSION) --locked --features cli"; exit 1; }
 
 # ---- cat footage (dev machine only) -----------------------------------------
 

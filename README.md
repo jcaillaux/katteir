@@ -66,8 +66,13 @@ make deb      # the Debian package, in target/release
 make help     # everything else
 ```
 
-`make deb` needs cargo-packager:
-`cargo install cargo-packager --version 0.11.8 --locked`.
+`make deb` needs cargo-packager, and cargo-about for the third-party
+notices:
+
+```sh
+cargo install cargo-packager --version 0.11.8 --locked
+cargo install cargo-about --version 0.9.2 --locked --features cli
+```
 
 ## Settings
 
@@ -130,6 +135,10 @@ KDE, GNOME, Sway or plain X11 yet.
 - **`patches/`** holds modified copies of two Slint crates, which keep
   Slint's own licence. Slint is used under its royalty-free licence, which
   asks for the badge above.
+- **Third-party code** in the binary (Rust crates, Slint, dav1d) comes
+  under its own licences, mostly MIT and Apache-2.0. `make notices` lists
+  it all with the licence texts, and the `.deb` includes that list in
+  `/usr/share/doc/katteir/`.
 
 Unless you say otherwise, any contribution you submit for inclusion in
 Katteir is licensed as above (code: MIT OR Apache-2.0), with no additional
