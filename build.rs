@@ -1,7 +1,7 @@
-//! Compiles the UI, and hands the app's names from `Cargo.toml`
-//! (`[package.metadata.app]`) to the code: `APP_NAME` and `APP_ID` for Rust
-//! (see `src/app.rs`), and the `AppInfo` global for Slint
-//! (`import { AppInfo } from "@app-info";`).
+//! Compiles the UI, and hands the app's names from `Cargo.toml` (the
+//! product name and identifier in `[package.metadata.packager]`) to the
+//! code: `APP_NAME` and `APP_ID` for Rust (see `src/app.rs`), and the
+//! `AppInfo` global for Slint (`import { AppInfo } from "@app-info";`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,23 +23,23 @@ fn main() {
     slint_build::compile_with_config("ui/app.slint", config).expect("compile ui/app.slint");
 }
 
-/// The display name and the app id from `[package.metadata.app]`, checked.
+/// The product name and identifier from `[package.metadata.packager]`, checked.
 fn app_names(manifest: &Path) -> (String, String) {
     let text = std::fs::read_to_string(manifest).expect("read Cargo.toml");
     let manifest: toml::Table = text.parse().expect("parse Cargo.toml");
-    let app = manifest
+    let packager = manifest
         .get("package")
         .and_then(|package| package.get("metadata"))
-        .and_then(|metadata| metadata.get("app"))
-        .expect("[package.metadata.app] in Cargo.toml");
-    let name = app.get("display-name").and_then(toml::Value::as_str).expect("display-name").to_owned();
-    let id = app.get("app-id").and_then(toml::Value::as_str).expect("app-id").to_owned();
+        .and_then(|metadata| metadata.get("packager"))
+        .expect("[package.metadata.packager] in Cargo.toml");
+    let name = packager.get("product-name").and_then(toml::Value::as_str).expect("product-name").to_owned();
+    let id = packager.get("identifier").and_then(toml::Value::as_str).expect("identifier").to_owned();
     // Both go into strings as they are: Slint, desktop entries, D-Bus.
     assert!(
         !name.is_empty() && name.len() <= 64 && name.chars().all(|c| c.is_alphanumeric() || c == ' '),
-        "display-name {name:?}: letters, digits and spaces only"
+        "product-name {name:?}: letters, digits and spaces only"
     );
-    assert!(is_reverse_dns(&id), "app-id {id:?}: a reverse-DNS name, as D-Bus and desktop entries need");
+    assert!(is_reverse_dns(&id), "identifier {id:?}: a reverse-DNS name, as D-Bus and desktop entries need");
     (name, id)
 }
 

@@ -1,6 +1,6 @@
 //! The app's names. They're written once, in `Cargo.toml`: `build.rs` passes
-//! `[package.metadata.app]` in as `APP_NAME` and `APP_ID`, and the crate name
-//! comes from Cargo. Constants that need a name inside them (`concat!`) read
+//! the product name and identifier of `[package.metadata.packager]` in as
+//! `APP_NAME` and `APP_ID`, and the crate name comes from Cargo. Constants that need a name inside them (`concat!`) read
 //! the same variables, next to where they're used.
 
 /// What people see: window titles, the tray, notifications, the menu.

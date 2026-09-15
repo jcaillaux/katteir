@@ -4,14 +4,37 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 description = "Every N minutes of work, a cat takes over the screen for a short break."
+# The .deb's Maintainer field.
+authors = ["Jonathan Caillaux"]
 
-# The app's names, written only here. build.rs hands them to the code
-# (src/app.rs, and the `@app-info` Slint global), and the Makefile reads them
-# for the desktop entry. The crate name above names the binary and the
-# config folder.
-[package.metadata.app]
-display-name = "Katteir"
-app-id = "io.github.jcaillaux.Katteir"
+# Packaging (cargo-packager 0.11.8, `make deb`). The product name and the
+# identifier are also the app's names, written only here: build.rs hands
+# them to the code (src/app.rs, and the `@app-info` Slint global), and the
+# Makefile reads them for the desktop entry. The crate name above names the
+# binary and the config folder.
+[package.metadata.packager]
+product-name = "Katteir"
+identifier = "io.github.jcaillaux.Katteir"
+formats = ["deb"]
+long-description = """
+Every N minutes of work, a cat walks onto the screen and falls asleep:
+that's your break. A countdown shows how long it lasts, and holding a
+button ends it early. It lives in the tray, warns you before each break,
+and can start at login.
+"""
+
+# Our own desktop entry and icon, named after the identifier so that docks
+# match the window's app id to them (cargo-packager's are named after the
+# binary). `make deb` stages them in target/deb-files.
+[package.metadata.packager.linux]
+generate-desktop-entry = false
+
+[package.metadata.packager.deb]
+section = "utils"
+# Written by `make deb`: the libraries loaded at run time, and libc at the
+# newest version the binary needs.
+depends = "target/deb-depends"
+files = { "target/deb-files" = "/" }
 
 [dependencies]
 # Pinned exactly: patches/ holds Cargo.toml-patched copies of two Slint crates

@@ -10,8 +10,8 @@
 
 # The app's names, read from Cargo.toml: the one place they're written.
 CRATE     := $(shell sed -n 's/^name = "\(.*\)"$$/\1/p' Cargo.toml | head -n 1)
-APP_ID    := $(shell sed -n 's/^app-id = "\(.*\)"$$/\1/p' Cargo.toml)
-APP_NAME  := $(shell sed -n 's/^display-name = "\(.*\)"$$/\1/p' Cargo.toml)
+APP_ID    := $(shell sed -n 's/^identifier = "\(.*\)"$$/\1/p' Cargo.toml)
+APP_NAME  := $(shell sed -n 's/^product-name = "\(.*\)"$$/\1/p' Cargo.toml)
 BIN       := target/release/$(CRATE)
 SPIKE     := spikes/av1-video
 SPIKE_BIN := $(SPIKE)/target/release/av1-video-spike
@@ -51,7 +51,7 @@ export PKG_CONFIG_PATH := $(DAV1D)/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_C
 export SYSTEM_DEPS_DAV1D_LINK := static
 
 .PHONY: help run build test clippy clean \
-	test-live install-desktop uninstall-desktop refresh-desktop-caches cat-ginger \
+	test-live install-desktop uninstall-desktop refresh-desktop-caches deb check-packager cat-ginger \
 	run-spike run-spike-break build-spike test-spike clean-spike \
 	deps check-tools clean-deps
 
@@ -64,6 +64,7 @@ help:
 	@echo "make clean            remove $(APP_NAME)'s build output"
 	@echo "make install-desktop  desktop entry + icon in ~/.local/share, so docks show $(APP_NAME)'s icon"
 	@echo "make uninstall-desktop  remove them"
+	@echo "make deb              Debian package in target/release (cargo-packager $(PACKAGER_VERSION))"
 	@echo "make cat-ginger       rebuild the ginger cat's clips from its footage (uv, ffmpeg)"
 	@echo ""
 	@echo "make run-spike        build and launch the AV1 video spike (1280x720 window)"
@@ -105,11 +106,13 @@ DATA_HOME    := $(or $(XDG_DATA_HOME),$(HOME)/.local/share)
 DESKTOP_FILE := $(DATA_HOME)/applications/$(APP_ID).desktop
 ICON_FILE    := $(DATA_HOME)/icons/hicolor/scalable/apps/$(APP_ID).svg
 
+# The desktop entry from its template; $(1) is what Exec runs.
+desktop_entry = sed -e '/^\#/d' -e 's|@NAME@|$(APP_NAME)|' -e 's|@ID@|$(APP_ID)|g' -e 's|@EXEC@|$(1)|' assets/app.desktop
+
 install-desktop: build
 	install -Dm644 assets/icons/tray.svg $(ICON_FILE)
 	mkdir -p $(dir $(DESKTOP_FILE))
-	sed -e '/^#/d' -e 's|@NAME@|$(APP_NAME)|' -e 's|@ID@|$(APP_ID)|g' -e 's|@EXEC@|$(CURDIR)/$(BIN)|' \
-		assets/app.desktop > $(DESKTOP_FILE)
+	$(call desktop_entry,$(CURDIR)/$(BIN)) > $(DESKTOP_FILE)
 	$(MAKE) --no-print-directory refresh-desktop-caches
 	@echo "Installed $(DESKTOP_FILE) and $(ICON_FILE)."
 	@echo "A dock that was already running (Crystal Dock, Plank...) may need a restart to show the icon."
@@ -125,6 +128,32 @@ refresh-desktop-caches:
 		gtk-update-icon-cache -q -t -f $(DATA_HOME)/icons/hicolor; fi
 	@if command -v update-desktop-database >/dev/null; then \
 		update-desktop-database -q $(DATA_HOME)/applications; fi
+
+# ---- packages ---------------------------------------------------------------
+
+# The .deb, by cargo-packager (configured in Cargo.toml): the binary in
+# /usr/bin, plus our desktop entry and icon, staged here under the app id's
+# name. Depends lists the libraries the app loads at run time, which dpkg
+# can't see (GL/EGL, fontconfig, Wayland, X11, xkbcommon), and libc at the
+# newest version the binary needs, measured on it.
+PACKAGER_VERSION := 0.11.8
+DEB_FILES   := target/deb-files
+DEB_DEPENDS := libgcc-s1 libegl1 libgl1 libfontconfig1 libwayland-client0 libwayland-egl1 \
+	libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxrender1 libxkbcommon0 libxkbcommon-x11-0
+
+deb: build check-packager
+	rm -rf $(DEB_FILES)
+	install -Dm644 assets/icons/tray.svg $(DEB_FILES)/usr/share/icons/hicolor/scalable/apps/$(APP_ID).svg
+	mkdir -p $(DEB_FILES)/usr/share/applications
+	$(call desktop_entry,$(CRATE)) > $(DEB_FILES)/usr/share/applications/$(APP_ID).desktop
+	{ objdump -T $(BIN) | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1 | sed 's/^GLIBC_/libc6 (>= /; s/$$/)/'; \
+		printf '%s\n' $(DEB_DEPENDS); } > target/deb-depends
+	cargo packager --release
+	@ls -l target/release/*.deb
+
+check-packager:
+	@cargo packager --version 2>/dev/null | grep -qx 'cargo-packager $(PACKAGER_VERSION)' || \
+		{ echo "needs cargo-packager $(PACKAGER_VERSION): cargo install cargo-packager --version $(PACKAGER_VERSION) --locked"; exit 1; }
 
 # ---- cat footage (dev machine only) -----------------------------------------
 

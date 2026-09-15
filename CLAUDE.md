@@ -64,7 +64,7 @@ once, in `Cargo.toml` (§5, Names).
 | Logging | `log` + `env_logger` | `env_logger` with default features off: no regex, no `jiff` timestamps, no colour. `RUST_LOG` still filters. |
 | Errors | `thiserror` in lib code; `anyhow` only in `main.rs` | |
 | Build/cross | `cargo-zigbuild` for Linux + Windows targets; macOS built and notarized on a Mac | |
-| Packaging | `cargo-packager` (AppImage, .deb, DMG/.app, MSI) | |
+| Packaging | `cargo-packager` 0.11.8: the .deb now; AppImage, DMG/.app, NSIS/MSI later | `cargo install cargo-packager --version 0.11.8 --locked` (`make deb` checks for it). It doesn't build the binary and doesn't find dependencies (§6). No rpm. |
 
 Release profile (`Cargo.toml`):
 ```toml
@@ -83,8 +83,8 @@ Check versions on crates.io before adding; don't trust remembered version number
 ```
 katteir/
 ├── CLAUDE.md
-├── Makefile                 # dev entry points: make run, test, clippy, run-spike (make help)
-├── Cargo.toml               # also the app's names: [package.metadata.app] (§5, Names)
+├── Makefile                 # dev entry points: make run, test, clippy, deb, run-spike (make help)
+├── Cargo.toml               # also the app's names and the .deb: [package.metadata.packager] (§5, §6)
 ├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info)
 ├── ui/
 │   ├── app.slint            # exports SettingsWindow, CatWindow
@@ -435,10 +435,11 @@ there plus prose.
 - The crate name, `katteir`, names the binary, the config folder
   (`$XDG_CONFIG_HOME/katteir/`), the runtime folder, the layer-shell
   namespace and the log filter (`app::DIR`, `app::LOG_FILTER`).
-- `[package.metadata.app]` has `display-name = "Katteir"`, what people see
-  (window titles, tray, notifications, the menu's Quit), and
-  `app-id = "io.github.jcaillaux.Katteir"`, reverse-DNS as freedesktop and
-  Flathub want: the Wayland app id (X11 class), the desktop entry and icon
+- `[package.metadata.packager]`, cargo-packager's own keys so packages use
+  them too, has `product-name = "Katteir"`, what people see (window
+  titles, tray, notifications, the menu's Quit), and
+  `identifier = "io.github.jcaillaux.Katteir"`, reverse-DNS as freedesktop
+  and Flathub want: the Wayland app id (X11 class), the desktop entry and icon
   names, the start-at-login entry, the single-instance D-Bus name.
 - `build.rs` checks both (the id must be a valid D-Bus name) and passes them
   to Rust as `APP_NAME` and `APP_ID` (`src/app.rs`, or `concat!(env!(…))`
@@ -459,6 +460,7 @@ make run                                   # build and launch Katteir (make help
 make test && make clippy                   # Katteir's tests; clippy with warnings as errors
 make test-live                             # the ignored tests: real session bus + notification server
 make install-desktop                       # desktop entry + icon in ~/.local/share (dock icon); make uninstall-desktop
+make deb                                   # Debian package in target/release (cargo-packager, see below)
 make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
 make run-spike-break                       # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
@@ -497,6 +499,23 @@ encodes with the ginger cat's measured times:
 ```sh
 uv run tools/cutout.py src.mp4 dev-assets/derived/<name> --entry-start S --loop-start S --loop-end S
 ```
+
+**The .deb** (`make deb`, configured under `[package.metadata.packager]`
+in `Cargo.toml`) holds `/usr/bin/katteir`, plus our desktop entry and SVG
+icon under the app id's name.
+- cargo-packager names its own desktop entry and icon after the binary,
+  but docks match a window to the entry named after its app id. So its
+  entry is off (`generate-desktop-entry = false`), and `make deb` stages
+  ours in `target/deb-files`, mapped to `/` (`deb.files`).
+- It doesn't find dependencies either. The binary links only libc, libm
+  and libgcc_s, and loads everything else at run time (GL/EGL,
+  fontconfig, Wayland, X11, xkbcommon), which dpkg can't see. So
+  `make deb` writes the Depends list (`target/deb-depends`), with libc at
+  the newest version the binary needs, measured by `objdump -T`.
+- 5.2 MB on 2026-09-15. **Built here, it needs glibc 2.43**, so it only
+  installs on distros that new: not Ubuntu 24.04 (2.39) nor Debian 12
+  (2.36). Next: build with `cargo zigbuild` for glibc 2.28, dav1d
+  included.
 
 ## 7. Assets policy
 
@@ -543,7 +562,9 @@ uv run tools/cutout.py src.mp4 dev-assets/derived/<name> --entry-start S --loop-
    settings window (the current one is compact enough).
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary, less the embedded
-   cat's clips, is over 7 MB).
+   cat's clips, is over 7 MB). The .deb is done (`make deb`, 2026-09-15)
+   but still needs the build machine's glibc; next, a glibc 2.28 build,
+   then the AppImage.
 6. **Later / optional**: per-app triggers, stats, stir on click (set aside
    on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).

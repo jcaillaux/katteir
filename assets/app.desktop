@@ -1,5 +1,5 @@
-# Template: @NAME@, @ID@ and @EXEC@ are filled in from Cargo.toml
-# ([package.metadata.app]) by the Makefile, and by packages (M4).
+# Template: the Makefile fills in @NAME@, @ID@ and @EXEC@ from Cargo.toml
+# ([package.metadata.packager]), for `make install-desktop` and `make deb`.
 [Desktop Entry]
 Type=Application
 Name=@NAME@
