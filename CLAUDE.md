@@ -87,7 +87,8 @@ katteir/
 ├── README.md                # for people: what Katteir is, install, build, settings, credits
 ├── LICENSE-MIT, LICENSE-APACHE  # the code's licence: MIT OR Apache-2.0 (§7)
 ├── Makefile                 # dev entry points: make run, test, clippy, deb (make help)
-├── .github/workflows/deb.yml  # the .deb, built in ubuntu:26.04 and ubuntu:22.04 (glibc 2.43 and 2.35, §6)
+├── .github/workflows/deb.yml  # the .deb, built in ubuntu:26.04 and ubuntu:22.04 (glibc 2.43 and 2.35); v* tags draft a release (§6)
+├── .github/release-notes.md   # the release notes template: @VERSION@, @GLIBC@, @PACKAGE@ filled in by the release job
 ├── Cargo.toml               # also the app's names and the .deb: [package.metadata.packager] (§5, §6)
 ├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info), and the clip-fields feature to Slint
 ├── ui/
@@ -579,6 +580,18 @@ icon under the app id's name.
   the artifact `deb-glibc<version>`. A zigbuild for glibc 2.28, deferred
   on 2026-09-15, would only add RHEL 8 and 9 and their rebuilds; dropped
   on 2026-09-16.
+- **Releases** (decided 2026-09-16): a `v*` tag on `main` runs the
+  `release` job once both packages are built. It fails unless the tag is
+  `v` + the `Cargo.toml` version, so bump the version first. It takes the
+  oldest-glibc package only (it installs everywhere the others do, so
+  nobody has to choose), names it `katteir_<version>_amd64_glibc<glibc>.deb`,
+  adds `SHA256SUMS`, and creates a **draft** release, "Katteir <version>",
+  with notes from `.github/release-notes.md`. Jonathan publishes the draft
+  by hand. Only that job has `contents: write`. The notes' distro list
+  (Ubuntu 22.04+, Mint 21+, Debian 12+) is written for glibc 2.35: change
+  it if the oldest container changes. Nothing else creates releases, and
+  the repo is private for now, so releases are visible only to people with
+  access to it.
 
 ## 7. Assets policy
 
@@ -668,11 +681,11 @@ icon under the app id's name.
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary, less the embedded
    cat's clips, is over 7 MB). The .deb is done (`make deb`, 2026-09-15),
-   and since 2026-09-16 a workflow builds it for glibc 2.43 and 2.35
-   (§6). Then the AppImage. Packages will be hosted as GitHub Releases
-   (later). A package needs the glibc it was built against or newer (apt
-   enforces it through `Depends`), so the release notes must state each
-   package's baseline.
+   and since 2026-09-16 a workflow builds it for glibc 2.43 and 2.35, and
+   a `v*` tag drafts a GitHub release with the glibc 2.35 package (§6).
+   Then the AppImage. A package needs the glibc it was built against or
+   newer (apt enforces it through `Depends`), so the release notes state
+   the baseline.
 6. **Later / optional**: per-app triggers, stats, stir on click (set aside
    on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).
