@@ -1,0 +1,89 @@
+# The .deb, built twice (CLAUDE.md §6). A package needs the glibc it was
+# built against or newer, so each Ubuntu container sets a baseline:
+# ubuntu:26.04 has glibc 2.43, the newest; ubuntu:22.04 has 2.35, which
+# covers Ubuntu 22.04+, Mint 21+, Debian 12+ and current Fedora and Arch.
+# Run it by hand (Actions → deb → Run workflow), or push a v* tag.
+name: deb
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    name: .deb (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:26.04", "ubuntu:22.04"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      # What `make check-tools` asks for, plus xz for nasm's tarball.
+      - name: Build packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git pkg-config python3-venv xz-utils
+
+      - uses: actions/checkout@v7
+
+      - name: Rust (stable)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # Building them takes minutes. Their versions are in the Makefile.
+      - name: Cache cargo-packager and cargo-about
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/cargo-packager
+            ~/.cargo/bin/cargo-about
+          key: packaging-tools-${{ matrix.image }}-${{ hashFiles('Makefile') }}
+
+      - run: make packaging-tools
+
+      - run: make deb
+
+      # Installs the package in this container: its Depends must resolve on
+      # this Ubuntu, and must bring every library the binary loads at run
+      # time (GL/EGL, Wayland, X11...), which dpkg can't see.
+      - name: Check the package
+        id: check
+        run: |
+          debs=(target/release/*.deb)
+          test "${#debs[@]}" -eq 1
+          test -f "${debs[0]}"
+          apt-get install -y --no-install-recommends "./${debs[0]}"
+          bin=$(dpkg -L "$(dpkg-deb -f "${debs[0]}" Package)" | grep '^/usr/bin/.')
+          test -x "$bin"
+          libs=$(strings -n 5 "$bin" | grep -oE 'lib[A-Za-z0-9_+-]+\.so\.[0-9]+' | sort -u)
+          test -n "$libs"
+          installed=$(ldconfig -p | awk 'NR > 1 { print $1 }')
+          missing=0
+          for lib in $libs; do
+            grep -qxF "$lib" <<< "$installed" || { echo "not installed: $lib"; missing=1; }
+          done
+          test "$missing" -eq 0
+          glibc=$(sed -n 's/^libc6 (>= \(.*\))$/\1/p' target/deb-depends)
+          test -n "$glibc"
+          echo "glibc=$glibc" >> "$GITHUB_OUTPUT"
+          echo "${{ matrix.image }}: ${debs[0]##*/} needs glibc $glibc or newer." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb-glibc${{ steps.check.outputs.glibc }}
+          path: target/release/*.deb
+          if-no-files-found: error

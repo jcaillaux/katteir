@@ -51,7 +51,7 @@ export PKG_CONFIG_PATH := $(DAV1D)/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_C
 export SYSTEM_DEPS_DAV1D_LINK := static
 
 .PHONY: help run build test clippy clean \
-	test-live install-desktop uninstall-desktop refresh-desktop-caches deb check-packager \
+	test-live install-desktop uninstall-desktop refresh-desktop-caches deb check-packager packaging-tools \
 	notices check-about cat-ginger \
 	run-spike run-spike-break build-spike test-spike clean-spike \
 	deps check-tools clean-deps
@@ -67,6 +67,7 @@ help:
 	@echo "make uninstall-desktop  remove them"
 	@echo "make deb              Debian package in target/release (cargo-packager $(PACKAGER_VERSION))"
 	@echo "make notices          third-party licence notices in $(NOTICES) (cargo-about $(ABOUT_VERSION))"
+	@echo "make packaging-tools  install cargo-packager and cargo-about at those versions"
 	@echo "make cat-ginger       rebuild the ginger cat's clips from its footage (uv, ffmpeg)"
 	@echo ""
 	@echo "make run-spike        build and launch the AV1 video spike (1280x720 window)"
@@ -160,18 +161,29 @@ check-packager:
 	@cargo packager --version 2>/dev/null | grep -qx 'cargo-packager $(PACKAGER_VERSION)' || \
 		{ echo "needs cargo-packager $(PACKAGER_VERSION): cargo install cargo-packager --version $(PACKAGER_VERSION) --locked"; exit 1; }
 
+# The packaging tools at the versions above, each installed only if it's
+# missing or another version: for a fresh machine, such as CI's containers.
+packaging-tools:
+	cargo packager --version 2>/dev/null | grep -qx 'cargo-packager $(PACKAGER_VERSION)' || \
+		cargo install cargo-packager --version $(PACKAGER_VERSION) --locked
+	cargo about --version 2>/dev/null | grep -qx 'cargo-about $(ABOUT_VERSION)' || \
+		cargo install cargo-about --version $(ABOUT_VERSION) --locked --features cli
+
 # The licences of the third-party code in the binary: every crate, from
 # cargo-about (tools/about.toml, tools/notices.hbs; --fail stops on a
 # licence it can't place). Then what cargo-about leaves out: Slint's
 # royalty-free licence, with the Slint crates as cargo tree finds them
 # (cargo-about 0.9.2 drops LicenseRef texts, see tools/about.toml, and
 # -L error silences its warnings about them), and dav1d, C built from
-# source, which cargo-about can't see.
+# source, which cargo-about can't see. Both read the whole dependency graph,
+# every platform's crates included, offline: cargo fetch downloads what a
+# build didn't (nothing, once they're cached).
 ABOUT_VERSION := 0.9.2
 NOTICES       := target/THIRD-PARTY-NOTICES.txt
 RULE          := ------------------------------------------------------------------------
 
 notices: check-about $(DAV1D_LIB)
+	cargo fetch --locked
 	cargo about -L error generate --fail --offline -c tools/about.toml tools/notices.hbs -o $(NOTICES)
 	{ printf '\n%s\nLicenseRef-Slint-Royalty-free-2.0 (Slint)\n\nUsed by:\n' '$(RULE)'; \
 		cargo tree --offline -e normal --target x86_64-unknown-linux-gnu --prefix none --format '{p}|{l}' \

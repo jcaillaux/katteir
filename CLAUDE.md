@@ -63,7 +63,7 @@ once, in `Cargo.toml` (§5, Names).
 | Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/katteir/config.toml` etc. (schema in §5). With logging, errors and our own code, M0 is 5.84 MB stripped against 5.19 MB for Slint alone, so ~0.65 MB. |
 | Logging | `log` + `env_logger` | `env_logger` with default features off: no regex, no `jiff` timestamps, no colour. `RUST_LOG` still filters. |
 | Errors | `thiserror` in lib code; `anyhow` only in `main.rs` | |
-| Build/cross | `cargo-zigbuild` for Linux + Windows targets; macOS built and notarized on a Mac | |
+| Build/cross | Linux: the .deb is built in Ubuntu containers by a GitHub workflow (§6); `cargo-zigbuild` for Windows; macOS built and notarized on a Mac | |
 | Packaging | `cargo-packager` 0.11.8: the .deb now; AppImage, DMG/.app, NSIS/MSI later | `cargo install cargo-packager --version 0.11.8 --locked` (`make deb` checks for it). It doesn't build the binary and doesn't find dependencies (§6). No rpm. Third-party notices: `cargo-about` 0.9.2 (`cargo install cargo-about --version 0.9.2 --locked --features cli`, §7). |
 
 Release profile (`Cargo.toml`):
@@ -86,6 +86,7 @@ katteir/
 ├── README.md                # for people: what Katteir is, install, build, settings, credits
 ├── LICENSE-MIT, LICENSE-APACHE  # the code's licence: MIT OR Apache-2.0 (§7)
 ├── Makefile                 # dev entry points: make run, test, clippy, deb, run-spike (make help)
+├── .github/workflows/deb.yml  # the .deb, built in ubuntu:26.04 and ubuntu:22.04 (glibc 2.43 and 2.35, §6)
 ├── Cargo.toml               # also the app's names and the .deb: [package.metadata.packager] (§5, §6)
 ├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info)
 ├── ui/
@@ -488,11 +489,11 @@ make test-live                             # the ignored tests: real session bus
 make install-desktop                       # desktop entry + icon in ~/.local/share (dock icon); make uninstall-desktop
 make deb                                   # Debian package in target/release (cargo-packager, see below)
 make notices                               # third-party licence notices in target/ (cargo-about, §7)
+make packaging-tools                       # cargo-packager and cargo-about at the pinned versions (CI's containers)
 make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
 make run-spike-break                       # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
 cargo test && cargo clippy --all-targets -- -D warnings
-cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.28
 cargo zigbuild --release --target x86_64-pc-windows-gnu
 cargo packager --release                   # per-platform bundles
 ```
@@ -541,10 +542,22 @@ icon under the app id's name.
   the newest version the binary needs, measured by `objdump -T`.
 - The licence files (code, assets, third-party notices; §7) go in
   `/usr/share/doc/katteir/`.
-- 5.2 MB on 2026-09-15. **Built here, it needs glibc 2.43**, so it only
-  installs on distros that new: not Ubuntu 24.04 (2.39) nor Debian 12
-  (2.36). A build for glibc 2.28 (`cargo zigbuild`, dav1d included) was
-  deferred on 2026-09-15.
+- 5.2 MB on 2026-09-15. A package needs the glibc it was built against or
+  newer (glibc keeps the old versions of its functions next to new ones),
+  so **built here it needs glibc 2.43**: not Ubuntu 24.04 (2.39) nor
+  Debian 12 (2.36). Only a few functions ask for more than 2.35: `acosf`
+  and `atan2f` (2.43) and Rust std's pidfd functions (2.39). dav1d uses
+  nothing newer than 2.6.
+- **The workflow** (`.github/workflows/deb.yml`, run by hand or on a `v*`
+  tag) builds the .deb twice, with `make packaging-tools` and `make deb`
+  as here, in two containers: `ubuntu:26.04` (glibc 2.43) and
+  `ubuntu:22.04` (2.35: Ubuntu 22.04+, Mint 21+, Debian 12+, current
+  Fedora and Arch). Each job then installs its package in its container,
+  which checks that the Depends resolve on that Ubuntu and bring every
+  library the binary names, and uploads it as the artifact
+  `deb-glibc<version>`. A zigbuild for glibc 2.28, deferred on
+  2026-09-15, would only add RHEL 8 and 9 and their rebuilds; dropped on
+  2026-09-16.
 
 ## 7. Assets policy
 
@@ -618,14 +631,12 @@ icon under the app id's name.
    settings window (the current one is compact enough).
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary, less the embedded
-   cat's clips, is over 7 MB). The .deb is done (`make deb`, 2026-09-15)
-   but still needs the build machine's glibc: the glibc 2.28 build was
-   deferred the same day. Then the AppImage. Packages will be hosted as
-   GitHub Releases, built by a workflow (later). A package needs the glibc
-   it was built against or newer (apt enforces it through `Depends`), so
-   the build machine sets the baseline. GitHub's `ubuntu-22.04` runner
-   (glibc 2.35: Ubuntu 22.04+, Debian 12+, Fedora 36+) may be enough,
-   and the release notes must state the baseline.
+   cat's clips, is over 7 MB). The .deb is done (`make deb`, 2026-09-15),
+   and since 2026-09-16 a workflow builds it for glibc 2.43 and 2.35
+   (§6). Then the AppImage. Packages will be hosted as GitHub Releases
+   (later). A package needs the glibc it was built against or newer (apt
+   enforces it through `Depends`), so the release notes must state each
+   package's baseline.
 6. **Later / optional**: per-app triggers, stats, stir on click (set aside
    on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).
