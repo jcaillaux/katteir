@@ -1,6 +1,7 @@
 //! Cat video (CLAUDE.md §5): stacked-alpha AV1 clips in IVF files, decoded
 //! by dav1d on a worker thread (`decode`) and drawn through an OpenGL texture
-//! (`gl`). Ported from `spikes/av1-video`.
+//! (`gl`). Ported from the AV1 video spike (`spikes/av1-video` on the
+//! `experiment` branch).
 
 pub mod decode;
 pub mod gl;

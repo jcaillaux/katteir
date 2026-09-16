@@ -1,7 +1,7 @@
-//! Decoder thread (ported from `spikes/av1-video`): feeds IVF temporal units
-//! to dav1d and hands decoded pictures to the UI thread through a small
-//! bounded channel. Order: the entry clip once, then the loop clip until the
-//! `Decoder` is dropped.
+//! Decoder thread, ported from the AV1 video spike (`spikes/av1-video` on
+//! the `experiment` branch): feeds IVF temporal units to dav1d and hands
+//! decoded pictures to the UI thread through a small bounded channel. Order:
+//! the entry clip once, then the loop clip until the `Decoder` is dropped.
 //!
 //! The channel does the pacing: the thread blocks while the queue is full.
 //! The UI takes a new frame only after the previous one was drawn, so a

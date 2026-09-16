@@ -9,9 +9,9 @@
 //! All GL state we touch is saved before and restored after, because we run
 //! inside Slint's (femtovg's) own GL context.
 //!
-//! Ported from `spikes/av1-video`. Raw GL is unsafe FFI, so this is one of the
-//! two places where the app allows `unsafe` (CLAUDE.md §4); every block has a
-//! SAFETY comment.
+//! Ported from the AV1 video spike, `spikes/av1-video` on the `experiment`
+//! branch. Raw GL is unsafe FFI, so this is one of the two places where the
+//! app allows `unsafe` (CLAUDE.md §4); every block has a SAFETY comment.
 #![allow(unsafe_code)]
 
 use std::rc::Rc;

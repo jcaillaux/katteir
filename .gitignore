@@ -1,4 +1,4 @@
-# Build output, at any depth (the root crate and spikes/*).
+# Build output, at any depth.
 target/
 target-*/
 
