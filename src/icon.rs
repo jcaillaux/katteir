@@ -58,7 +58,7 @@ mod tests {
         for pixmap in &PIXMAPS {
             let side = usize::from(pixmap.size_px);
             assert_eq!(argb_at(pixmap, 0, side - 1)[0], 0, "bottom-left corner of {side} px");
-            // Below the eyes, beside the nose: the ginger face (#e8914a).
+            // Below the eyes, beside the muzzle: ginger fur.
             let [a, r, g, b] = argb_at(pixmap, side * 3 / 10, side * 7 / 10);
             assert_eq!(a, 255, "{side} px");
             assert!(r > g && g > b, "{side} px face is {r},{g},{b}");

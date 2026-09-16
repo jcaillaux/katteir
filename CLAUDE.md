@@ -133,7 +133,7 @@ katteir/
 │   └── icons/               # CC BY-NC 4.0; the .argb files are rendered by tools/icons.sh
 │       ├── app.svg          # the app icon: desktop entry, docks, menus, notifications (§7)
 │       ├── app-48.argb      # the same at 48 px: the X11 window icon
-│       ├── tray.svg         # the tray icon, the cat's face alone ($XDG_RUNTIME_DIR/katteir/)
+│       ├── tray.svg         # the tray icon: the app icon's cat, head alone ($XDG_RUNTIME_DIR/katteir/)
 │       └── tray-<px>.argb   # the same at 16/22/32/48 px: the tray's IconPixmap
 ├── tools/
 │   ├── about.toml, notices.hbs  # cargo-about config and template: third-party notices (make notices)
@@ -629,8 +629,11 @@ icon under the app id's name.
     path in it, because Qt's SVG renderer (Crystal Dock, KDE) ignores
     clipping: the rim covers the web's corners instead. Its detail reads
     from 48 px; below that it's an orange cat on a round shield.
-  - **The tray icon** (`tray.svg`) stays the plain face: at 16 to 22 px
-    the app icon's detail is noise.
+  - **The tray icon** (`tray.svg`, redrawn 2026-09-16 to match) is the app
+    icon's cat head alone, without the shield, which is a blue dot at 16
+    to 22 px. It has thicker outlines and eyes, and no whiskers or ear
+    tufts, which blur at that size. It replaced a plain face drawn before
+    the app icon.
 - Nothing from zokuzoku's repos is ever committed, embedded or shipped. No
   "neko", "gatekeeper", or their icon style in names or visuals.
 - **One exception, local testing only:** the two original clips
