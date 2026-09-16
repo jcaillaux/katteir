@@ -548,8 +548,8 @@ icon under the app id's name.
   Debian 12 (2.36). Only a few functions ask for more than 2.35: `acosf`
   and `atan2f` (2.43) and Rust std's pidfd functions (2.39). dav1d uses
   nothing newer than 2.6.
-- **The workflow** (`.github/workflows/deb.yml`, run by hand or on a `v*`
-  tag) builds the .deb twice, with `make packaging-tools` and `make deb`
+- **The workflow** (`.github/workflows/deb.yml`, on every push to main,
+  on `v*` tags, and by hand) builds the .deb twice, with `make packaging-tools` and `make deb`
   as here, in two containers: `ubuntu:26.04` (glibc 2.43) and
   `ubuntu:22.04` (2.35: Ubuntu 22.04+, Mint 21+, Debian 12+, current
   Fedora and Arch). Each job then installs its package in its container,

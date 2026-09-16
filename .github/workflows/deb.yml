@@ -2,12 +2,14 @@
 # built against or newer, so each Ubuntu container sets a baseline:
 # ubuntu:26.04 has glibc 2.43, the newest; ubuntu:22.04 has 2.35, which
 # covers Ubuntu 22.04+, Mint 21+, Debian 12+ and current Fedora and Arch.
-# Run it by hand (Actions → deb → Run workflow), or push a v* tag.
+# It runs on every push to main and on v* tags, and by hand (Actions →
+# deb → Run workflow).
 name: deb
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
