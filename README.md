@@ -91,7 +91,18 @@ in `~/.config/katteir/config.toml`:
 A cat is two clips: an entry clip, played once, then a clip that loops
 until the break ends. Both are AV1 videos with transparency, in IVF files
 ("stacked alpha": the colour picture on top, its transparency below). Set
-their full paths in the settings window.
+their full paths in `~/.config/katteir/config.toml`, then restart Katteir:
+
+```toml
+[cat]
+entry_clip = "/home/you/cats/mine/entry.ivf"
+loop_clip = "/home/you/cats/mine/loop.ivf"
+```
+
+If a clip can't be used, the bundled cat plays, and when the break starts
+the settings window says why. A development build (`make run`) also has
+fields for the two paths in the settings window, which check each clip as
+you type.
 
 Two tools help make them (both need ffmpeg; details in `CLAUDE.md`):
 - `tools/encode.sh` turns a video with an alpha channel into a clip;

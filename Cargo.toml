@@ -39,6 +39,12 @@ section = "utils"
 depends = "target/deb-depends"
 files = { "target/deb-files" = "/" }
 
+[features]
+# The settings window's clip path fields: a dev tool, which `make run` turns
+# on. Packages are built without it; clip paths set in config.toml work
+# either way. build.rs hands it to Slint as `AppInfo.clip-fields`.
+clip-fields = []
+
 [dependencies]
 # Pinned exactly: patches/ holds Cargo.toml-patched copies of two Slint crates
 # that must match this version (see patches/README.md).

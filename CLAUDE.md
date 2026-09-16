@@ -88,7 +88,7 @@ katteir/
 ├── Makefile                 # dev entry points: make run, test, clippy, deb, run-spike (make help)
 ├── .github/workflows/deb.yml  # the .deb, built in ubuntu:26.04 and ubuntu:22.04 (glibc 2.43 and 2.35, §6)
 ├── Cargo.toml               # also the app's names and the .deb: [package.metadata.packager] (§5, §6)
-├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info)
+├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info), and the clip-fields feature to Slint
 ├── ui/
 │   ├── app.slint            # exports SettingsWindow, CatWindow
 │   ├── cat.slint            # CatWindow: the overlay (video, countdown badge, hold pill)
@@ -228,6 +228,14 @@ dismiss_hold_secs = 5     # 1..=30, hold time to end a break early
 - **Warn, don't refuse:** a clip that's missing or unusable is still saved
   (it may be on a drive that isn't mounted yet). The field turns red, the
   Save notice says why, and the cat window falls back to the bundled cat. The
+- **The clip fields are a dev tool** (decided 2026-09-16): the settings
+  window shows them only in builds with the `clip-fields` Cargo feature,
+  which `make run` turns on (`RUN_FEATURES`). `make build`, `make deb` and
+  the workflow leave it off, so packages don't show them. The paths set
+  in the file still work there, and Save keeps them. build.rs hands the
+  feature to Slint as the constant `AppInfo.clip-fields`, and the fields
+  are `if`s on it, so the Rust code is the same in both builds. Slint
+  still compiles the hidden fields in: the `if`s cost 15 KB in both.
   same goes for setting only one of the two clips. Only relative paths are
   dropped, because the app can't know what they're relative to.
 
@@ -483,7 +491,7 @@ there plus prose.
 ## 6. Build & run
 
 ```sh
-make run                                   # build and launch Katteir (make help lists all targets)
+make run                                   # build and launch Katteir, with the clip fields (make help lists all targets)
 make test && make clippy                   # Katteir's tests; clippy with warnings as errors
 make test-live                             # the ignored tests: real session bus + notification server
 make install-desktop                       # desktop entry + icon in ~/.local/share (dock icon); make uninstall-desktop

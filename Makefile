@@ -13,6 +13,7 @@ CRATE     := $(shell sed -n 's/^name = "\(.*\)"$$/\1/p' Cargo.toml | head -n 1)
 APP_ID    := $(shell sed -n 's/^identifier = "\(.*\)"$$/\1/p' Cargo.toml)
 APP_NAME  := $(shell sed -n 's/^product-name = "\(.*\)"$$/\1/p' Cargo.toml)
 BIN       := target/release/$(CRATE)
+RUN_FEATURES ?= clip-fields
 SPIKE     := spikes/av1-video
 SPIKE_BIN := $(SPIKE)/target/release/av1-video-spike
 DEPS      := $(CURDIR)/.deps
@@ -57,8 +58,8 @@ export SYSTEM_DEPS_DAV1D_LINK := static
 	deps check-tools clean-deps
 
 help:
-	@echo "make run              build and launch $(APP_NAME)"
-	@echo "make build            release build of $(APP_NAME) (builds dav1d first if needed)"
+	@echo "make run              build and launch $(APP_NAME), with the clip path fields (RUN_FEATURES=$(RUN_FEATURES))"
+	@echo "make build            release build of $(APP_NAME), as packages have it (builds dav1d first if needed)"
 	@echo "make test             $(APP_NAME) unit tests"
 	@echo "make test-live        tests against the real session bus (shows nothing)"
 	@echo "make clippy           clippy on $(APP_NAME), warnings as errors"
@@ -81,7 +82,11 @@ help:
 
 # ---- the app ----------------------------------------------------------------
 
-run: build
+# The dev build: RUN_FEATURES turns on the settings window's clip path
+# fields, which `make build` and packages leave out. `make run RUN_FEATURES=`
+# shows the window as packages have it.
+run: check-tools $(DAV1D_LIB)
+	cargo build --release --features '$(RUN_FEATURES)'
 	$(BIN)
 
 build: check-tools $(DAV1D_LIB)
