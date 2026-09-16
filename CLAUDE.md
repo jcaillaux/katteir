@@ -130,8 +130,11 @@ katteir/
 │   ├── LICENSE.md           # the assets' licence, CC BY-NC 4.0; its full text beside it
 │   ├── cats/ginger/         # the bundled cat (CC BY-NC 4.0, embedded with include_bytes!): AI footage, prompt.txt
 │   ├── app.desktop          # desktop entry template: make install-desktop fills in names and Exec
-│   └── icons/tray.svg       # the icon (CC BY-NC 4.0): tray ($XDG_RUNTIME_DIR/katteir/) and desktop entry
-│       └── tray-<px>.argb   # the same at 16/22/32/48 px, rendered by tools/icons.sh
+│   └── icons/               # CC BY-NC 4.0; the .argb files are rendered by tools/icons.sh
+│       ├── app.svg          # the app icon: desktop entry, docks, menus, notifications (§7)
+│       ├── app-48.argb      # the same at 48 px: the X11 window icon
+│       ├── tray.svg         # the tray icon, the cat's face alone ($XDG_RUNTIME_DIR/katteir/)
+│       └── tray-<px>.argb   # the same at 16/22/32/48 px: the tray's IconPixmap
 ├── tools/
 │   ├── about.toml, notices.hbs  # cargo-about config and template: third-party notices (make notices)
 │   ├── cutout.py            # numpy + scipy via uv: footage on a plain backdrop → entry + loop with alpha (dev-time only)
@@ -225,6 +228,14 @@ dismiss_hold_secs = 5     # 1..=30, hold time to end a break early
   `save_file` touch the disk; saving writes a temporary file, then renames it.
 - Clip paths are runtime paths, so they may point at `dev-assets/` (§7). The
   settings window checks each clip with `video::probe_clip`.
+- **The clip fields are a dev tool** (decided 2026-09-16): the settings
+  window shows them only in builds with the `clip-fields` Cargo feature,
+  which `make run` turns on (`RUN_FEATURES`). `make build`, `make deb` and
+  the workflow leave it off, so packages don't show them. The paths set
+  in the file still work there, and Save keeps them. build.rs hands the
+  feature to Slint as the constant `AppInfo.clip-fields`, and the fields
+  are `if`s on it, so the Rust code is the same in both builds. Slint
+  still compiles the hidden fields in: the `if`s cost 15 KB in both.
 - **Warn, don't refuse:** a clip that's missing or unusable is still saved
   (it may be on a drive that isn't mounted yet). The field turns red, the
   Save notice says why, and the cat window falls back to the bundled cat. The
@@ -425,9 +436,10 @@ things may differ by OS; everything else is shared.
   see-through) plus extras where they work (always-on-top on X11,
   layer-shell on Wayland compositors that offer it). No XEmbed tray: it's X11-only and
   obsolete, and every current X11 desktop hosts StatusNotifierItem.
-- **Window icon:** the same pixels through Slint's `icon` property. winit
-  sets `_NET_WM_ICON` on X11 and ignores it on Wayland (0.30.13 has no
-  xdg-toplevel-icon); there the desktop entry supplies the icon.
+- **Window icon:** the app icon at 48 px (`src/icon.rs`), through Slint's
+  `icon` property. winit sets `_NET_WM_ICON` on X11 and ignores it on
+  Wayland (0.30.13 has no xdg-toplevel-icon); there the desktop entry
+  supplies the icon.
 - **One instance per session:** at startup, `Platform::start` claims the app
   id, `io.github.jcaillaux.Katteir`, as a bus name. If it's taken, it calls
   `Show` (at `/Instance`) on the owner (which
@@ -438,17 +450,18 @@ things may differ by OS; everything else is shared.
   class (X11) and a desktop entry of that name, not through the tray. main
   sets the app id to `io.github.jcaillaux.Katteir` (`slint::set_xdg_app_id`,
   before any window is shown), and `make install-desktop` installs
-  `io.github.jcaillaux.Katteir.desktop` (from `assets/app.desktop`) and the icon
-  under `~/.local/share` for a dev checkout, then rebuilds the user icon
-  cache and desktop database. Without them, the dock shows a blank disk. On
-  the dev machine the bottom dock is Crystal Dock 2.16, a separate program
-  from `budgie-panel`. It picks up a new desktop entry at once (it watches
-  the applications folders), but its Qt icon theme doesn't see an icon
-  added after it started. Its log showed "Could not find icon with name:
-  catnap" until it was restarted. So a dock already running at the first
-  install needs one restart; packages install the icon before the app's
-  first launch, so users won't hit this. labwc's window switcher looks the
-  icon up fresh each time.
+  `io.github.jcaillaux.Katteir.desktop` (from `assets/app.desktop`) and the
+  app icon (`assets/icons/app.svg`) under `~/.local/share` for a dev
+  checkout, then rebuilds the user icon cache and desktop database.
+  Without them, the dock shows a blank disk. On the dev machine the bottom
+  dock is Crystal Dock 2.16, a separate program from `budgie-panel`. It
+  picks up a new desktop entry at once (it watches the applications
+  folders), but its Qt icon theme doesn't see an icon added after it
+  started. Its log showed "Could not find icon with name: catnap" until it
+  was restarted. So a dock already running at the first install needs one
+  restart; packages install the icon before the app's first launch, so
+  users won't hit this. labwc's window switcher looks the icon up fresh
+  each time.
 - **Start at login** (`src/autostart.rs`):
   - It's a setting, off by default, applied at once by a checkbox in the
     settings window.
@@ -481,7 +494,7 @@ there plus prose.
   where a constant needs one inside it), and to Slint as a generated
   `AppInfo` global (`import { AppInfo } from "@app-info";`). The Makefile
   reads them from `Cargo.toml` to fill in the `assets/app.desktop` template.
-  File names carry no name (`assets/icons/tray.svg`).
+  File names carry no name (`assets/icons/app.svg`).
 - `migrate.rs` moves what the working name left behind, once, at startup:
   `~/.config/catnap/` becomes `~/.config/katteir/` if the new folder doesn't
   exist yet, and a `catnap.desktop` start-at-login entry is replaced by the
@@ -606,6 +619,18 @@ icon under the app id's name.
   content with the user who made it. The 30 s source stays local in
   `dev-assets/seedance/`.
 - `assets/icons/` holds icons drawn for Katteir; each file says its licence.
+  - **The app icon** (`app.svg`, adopted 2026-09-16, Jonathan's design): a
+    Norse round shield, blue with an iron rim and rivets, painted in black
+    with the Web of Wyrd (the Norns' weaving of fate and time), and the
+    sleeping ginger cat's head in front, with tabby stripes, muzzle and
+    whiskers. It carries the name: *Katt*, a Norse shield for *Eir* who
+    looks after health, and time for a timer. The Web of Wyrd is a modern
+    symbol from the Norse revival, not a Viking-age one. There's no clip
+    path in it, because Qt's SVG renderer (Crystal Dock, KDE) ignores
+    clipping: the rim covers the web's corners instead. Its detail reads
+    from 48 px; below that it's an orange cat on a round shield.
+  - **The tray icon** (`tray.svg`) stays the plain face: at 16 to 22 px
+    the app icon's detail is noise.
 - Nothing from zokuzoku's repos is ever committed, embedded or shipped. No
   "neko", "gatekeeper", or their icon style in names or visuals.
 - **One exception, local testing only:** the two original clips

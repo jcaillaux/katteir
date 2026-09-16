@@ -1,5 +1,7 @@
 # Katteir
 
+<img src="assets/icons/app.svg" alt="" width="128" align="right">
+
 Every N minutes of work, a cat walks onto your screen and falls asleep:
 that's your break. When the break is over the cat leaves by itself, or you
 hold a button to end the break early.
@@ -128,7 +130,9 @@ KDE, GNOME, Sway or plain X11 yet.
 
 - The cat: footage generated with ByteDance Seedance 2.5, then cut out and
   encoded for Katteir (`assets/cats/ginger/`).
-- The icon: drawn for Katteir.
+- The icons, drawn for Katteir: the app icon is a Norse round shield
+  painted with the Web of Wyrd, the sleeping ginger cat in front; the tray
+  shows the cat's face alone.
 - The AV1 decoder, [dav1d](https://code.videolan.org/videolan/dav1d), is
   BSD-2-Clause.
 - Inspired by Cat Gatekeeper, a browser extension by zokuzoku. Katteir is an
@@ -138,7 +142,7 @@ KDE, GNOME, Sway or plain X11 yet.
 
 - **The code** is licensed under either of [MIT](LICENSE-MIT) or
   [Apache-2.0](LICENSE-APACHE), at your option.
-- **The cat and the icon** are licensed under
+- **The cat and the icons** are licensed under
   [CC BY-NC 4.0](assets/LICENSE.md): you may share and adapt them, with
   credit, but not commercially. The cat's clips are embedded in the binary,
   so the binary and its packages may not be sold either. (They were CC0

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- The app icon: a Norse round shield painted with the Web of Wyrd, the sleeping
+       ginger cat in front. CC BY-NC 4.0 (assets/LICENSE.md), drawn for Katteir. -->
+  <defs>
+    <radialGradient id="paint" cx="0.45" cy="0.4" r="0.65">
+      <stop offset="0" stop-color="#3a609a"/>
+      <stop offset="1" stop-color="#2b4a7c"/>
+    </radialGradient>
+    <radialGradient id="fur" cx="0.5" cy="0.3" r="0.75">
+      <stop offset="0" stop-color="#f5aa68"/>
+      <stop offset="1" stop-color="#dd8039"/>
+    </radialGradient>
+  </defs>
+
+  <!-- The shield: painted field, the Web of Wyrd, iron rim and rivets. The rim
+       covers the web's corners, so nothing needs clipping (Qt's SVG can't clip). -->
+  <circle cx="64" cy="64" r="52" fill="url(#paint)"/>
+  <g fill="none" stroke="#05070d" stroke-opacity="0.75" stroke-width="2.5" stroke-linecap="round">
+    <path d="M24 24 H104 M24 64 H104 M24 104 H104"/>
+    <path d="M24 24 V104 M64 24 V104 M104 24 V104"/>
+    <path d="M24 24 L104 104 M104 24 L24 104"/>
+    <path d="M64 24 L104 64 L64 104 L24 64 Z"/>
+  </g>
+  <circle cx="64" cy="64" r="53" fill="none" stroke="#565d68" stroke-width="8"/>
+  <circle cx="64" cy="64" r="57" fill="none" stroke="#3b2414" stroke-width="2.5"/>
+  <circle cx="64" cy="64" r="49" fill="none" stroke="#3b2414" stroke-width="2.5"/>
+  <g fill="#c9ced6">
+    <circle cx="64" cy="11" r="2.2"/><circle cx="64" cy="117" r="2.2"/>
+    <circle cx="11" cy="64" r="2.2"/><circle cx="117" cy="64" r="2.2"/>
+    <circle cx="26.5" cy="26.5" r="2.2"/><circle cx="101.5" cy="101.5" r="2.2"/>
+    <circle cx="26.5" cy="101.5" r="2.2"/><circle cx="101.5" cy="26.5" r="2.2"/>
+  </g>
+
+  <!-- The cat's head. -->
+  <g transform="translate(64 71) scale(0.8) translate(-64 -66)">
+    <g stroke="#3b2414" stroke-width="4" stroke-linejoin="round">
+      <path d="M33 60 Q 30 38 37 22 Q 50 30 59 43 Z" fill="url(#fur)"/>
+      <path d="M95 60 Q 98 38 91 22 Q 78 30 69 43 Z" fill="url(#fur)"/>
+      <path d="M64 38 C 82 38, 96 48, 99 64 C 100 72, 98 78, 95 82
+               Q 100 83, 103 89 Q 97 88, 93 91 Q 97 93, 98 98 Q 91 95, 86 95
+               C 80 101, 72 104, 64 104 C 56 104, 48 101, 42 95
+               Q 37 95, 30 98 Q 31 93, 35 91 Q 31 88, 25 89 Q 28 83, 33 82
+               C 30 78, 28 72, 29 64 C 32 48, 46 38, 64 38 Z" fill="url(#fur)"/>
+    </g>
+    <path d="M38 52 Q 37 40 40 31 Q 48 37 53 45 Z M90 52 Q 91 40 88 31 Q 80 37 75 45 Z" fill="#f4b49a"/>
+    <g fill="none" stroke="#fff3e0" stroke-width="1.6" stroke-linecap="round">
+      <path d="M43 48 l-2 -9 M47 47 l0 -7 M85 48 l2 -9 M81 47 l0 -7"/>
+    </g>
+    <g fill="#b95f24">
+      <path d="M64 40 L 61 51 L 64 56 L 67 51 Z"/>
+      <path d="M54 42 L 53 50 L 56 52 L 58 43 Z M74 42 L 75 50 L 72 52 L 70 43 Z"/>
+      <path d="M30 67 L 41 70 L 30 73 Z M98 67 L 87 70 L 98 73 Z"/>
+      <path d="M32 77 L 40 78 L 33 81 Z M96 77 L 88 78 L 95 81 Z"/>
+    </g>
+    <path d="M64 79 C 58 78, 50 80, 49 87 C 48 94, 56 97, 64 94 C 72 97, 80 94, 79 87 C 78 80, 70 78, 64 79 Z" fill="#fbe3c4"/>
+    <g fill="none" stroke="#3b2414" stroke-width="3.5" stroke-linecap="round">
+      <path d="M40 69 Q 48 77 56 69 l 3 -1"/>
+      <path d="M88 69 Q 80 77 72 69 l -3 -1"/>
+    </g>
+    <path d="M59.5 80.5 h9 q0 3.5 -4.5 6 q-4.5 -2.5 -4.5 -6 z" fill="#e07a7a" stroke="#3b2414" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M64 86.5 v2.5 q-3 3.5 -6.5 1.5 M64 89 q3 3.5 6.5 1.5" fill="none" stroke="#3b2414" stroke-width="2" stroke-linecap="round"/>
+    <g fill="none" stroke="#fff3e0" stroke-opacity="0.85" stroke-width="1.5" stroke-linecap="round">
+      <path d="M50 87 L 24 84 M50 90 L 26 93 M78 87 L 104 84 M78 90 L 102 93"/>
+    </g>
+  </g>
+</svg>

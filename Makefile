@@ -118,7 +118,7 @@ ICON_FILE    := $(DATA_HOME)/icons/hicolor/scalable/apps/$(APP_ID).svg
 desktop_entry = sed -e '/^\#/d' -e 's|@NAME@|$(APP_NAME)|' -e 's|@ID@|$(APP_ID)|g' -e 's|@EXEC@|$(1)|' assets/app.desktop
 
 install-desktop: build
-	install -Dm644 assets/icons/tray.svg $(ICON_FILE)
+	install -Dm644 assets/icons/app.svg $(ICON_FILE)
 	mkdir -p $(dir $(DESKTOP_FILE))
 	$(call desktop_entry,$(CURDIR)/$(BIN)) > $(DESKTOP_FILE)
 	$(MAKE) --no-print-directory refresh-desktop-caches
@@ -152,7 +152,7 @@ DEB_DEPENDS := libgcc-s1 libegl1 libgl1 libfontconfig1 libwayland-client0 libway
 
 deb: build check-packager notices
 	rm -rf $(DEB_FILES)
-	install -Dm644 assets/icons/tray.svg $(DEB_FILES)/usr/share/icons/hicolor/scalable/apps/$(APP_ID).svg
+	install -Dm644 assets/icons/app.svg $(DEB_FILES)/usr/share/icons/hicolor/scalable/apps/$(APP_ID).svg
 	install -Dm644 -t $(DEB_FILES)/usr/share/doc/$(CRATE) LICENSE-MIT LICENSE-APACHE assets/LICENSE-CC-BY-NC-4.0.txt $(NOTICES)
 	install -Dm644 assets/LICENSE.md $(DEB_FILES)/usr/share/doc/$(CRATE)/LICENSE-ASSETS.md
 	mkdir -p $(DEB_FILES)/usr/share/applications
