@@ -2,8 +2,8 @@
 # built against or newer, so each Ubuntu container sets a baseline:
 # ubuntu:26.04 has glibc 2.43, the newest; ubuntu:22.04 has 2.35, which
 # covers Ubuntu 22.04+, Mint 21+, Debian 12+ and current Fedora and Arch.
-# It runs on every push to main and on v* tags, and by hand (Actions →
-# deb → Run workflow).
+# It runs on pushes to main and on v* tags, and by hand (Actions → deb →
+# Run workflow).
 name: deb
 
 on:
@@ -11,6 +11,17 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    # Not when a push changes only Markdown files, except the assets'
+    # licence, which the package ships. Tags ignore path filters.
+    paths:
+      - "**"
+      - "!**.md"
+      - "assets/LICENSE.md"
+
+# A newer push to the same branch cancels the run still going.
+concurrency:
+  group: deb-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

@@ -548,16 +548,17 @@ icon under the app id's name.
   Debian 12 (2.36). Only a few functions ask for more than 2.35: `acosf`
   and `atan2f` (2.43) and Rust std's pidfd functions (2.39). dav1d uses
   nothing newer than 2.6.
-- **The workflow** (`.github/workflows/deb.yml`, on every push to main,
-  on `v*` tags, and by hand) builds the .deb twice, with `make packaging-tools` and `make deb`
-  as here, in two containers: `ubuntu:26.04` (glibc 2.43) and
-  `ubuntu:22.04` (2.35: Ubuntu 22.04+, Mint 21+, Debian 12+, current
-  Fedora and Arch). Each job then installs its package in its container,
-  which checks that the Depends resolve on that Ubuntu and bring every
-  library the binary names, and uploads it as the artifact
-  `deb-glibc<version>`. A zigbuild for glibc 2.28, deferred on
-  2026-09-15, would only add RHEL 8 and 9 and their rebuilds; dropped on
-  2026-09-16.
+- **The workflow** (`.github/workflows/deb.yml`, on pushes to main that
+  change more than Markdown files, on `v*` tags, and by hand; a newer
+  push cancels a run still going) builds the .deb twice, with
+  `make packaging-tools` and `make deb` as here, in two containers:
+  `ubuntu:26.04` (glibc 2.43) and `ubuntu:22.04` (2.35: Ubuntu 22.04+,
+  Mint 21+, Debian 12+, current Fedora and Arch). Each job then installs
+  its package in its container, which checks that the Depends resolve on
+  that Ubuntu and bring every library the binary names, and uploads it as
+  the artifact `deb-glibc<version>`. A zigbuild for glibc 2.28, deferred
+  on 2026-09-15, would only add RHEL 8 and 9 and their rebuilds; dropped
+  on 2026-09-16.
 
 ## 7. Assets policy
 
