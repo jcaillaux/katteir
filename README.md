@@ -31,19 +31,21 @@ included, with no runtime and no web view. It's written in Rust with Slint.
 
 Linux only for now. Windows and macOS will come later.
 
-There are no downloads yet, so build the Debian package yourself (see
-[Build](#build)), then install it:
+Download the `.deb` from the
+[latest release](https://github.com/jcaillaux/katteir/releases/latest),
+then install it:
 
 ```sh
-make deb
-sudo apt install ./target/release/katteir_0.1.0_amd64.deb
+sudo apt install ./katteir_*_amd64_glibc2.35.deb
 ```
 
-The package needs the glibc version of the machine it was built on, or a
-newer one: build it on the oldest system you want to install it on. To
-remove it: `sudo apt remove katteir`.
+It needs glibc 2.35 or newer (`ldd --version` shows yours): Ubuntu 22.04
+and later, Linux Mint 21 and later, Debian 12 and later. To remove it:
+`sudo apt remove katteir`.
 
-You can also run Katteir straight from the build with `make run`.
+You can also build the package yourself with `make deb` (see
+[Build](#build)); it then needs the glibc of the machine it was built on,
+or a newer one. Or run Katteir straight from the build with `make run`.
 
 ## Build
 

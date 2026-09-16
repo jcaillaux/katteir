@@ -1,9 +1,9 @@
 # Katteir developer entry points. `make help` lists them.
 #
-# `make run` builds and launches the app. It and the AV1 video spike both
-# need dav1d, which is built into .deps/ on first use together with the tools
-# to build it (meson and ninja from PyPI in a virtualenv, nasm from a
-# checksummed source tarball). No sudo needed.
+# `make run` builds and launches the app. It needs dav1d, which is built into
+# .deps/ on first use together with the tools to build it (meson and ninja
+# from PyPI in a virtualenv, nasm from a checksummed source tarball). No sudo
+# needed. The early spikes, and their targets, are on the experiment branch.
 #
 # Needs: cargo, a C toolchain (cc), git, python3 with venv, make, curl, tar,
 # sha256sum, pkg-config.
@@ -14,8 +14,6 @@ APP_ID    := $(shell sed -n 's/^identifier = "\(.*\)"$$/\1/p' Cargo.toml)
 APP_NAME  := $(shell sed -n 's/^product-name = "\(.*\)"$$/\1/p' Cargo.toml)
 BIN       := target/release/$(CRATE)
 RUN_FEATURES ?= clip-fields
-SPIKE     := spikes/av1-video
-SPIKE_BIN := $(SPIKE)/target/release/av1-video-spike
 DEPS      := $(CURDIR)/.deps
 TOOLS     := $(DEPS)/bin
 VENV      := $(DEPS)/venv
@@ -34,17 +32,6 @@ NASM_VERSION  := 2.16.03
 NASM_SHA256   := 1412a1c760bbd05db026b6c0d1657affd6631cd0a63cddb6f73cc6d4aa616148
 NASM_SRC      := $(DEPS)/src/nasm-$(NASM_VERSION)
 
-# Spike clips are local-only test material (dev-assets/ is gitignored, CLAUDE.md §7).
-CLIPS   := dev-assets/derived
-ENTRY   ?= $(CLIPS)/entry_720p30.ivf
-LOOP    ?= $(CLIPS)/loop_720p15.ivf
-SECS    ?= 120
-THREADS ?= 1
-# Spike window switches, 1 = on. ON_TOP does nothing on Wayland.
-SEE_THROUGH ?= 0
-ON_TOP      ?= 0
-FULLSCREEN  ?= 0
-
 # The .deps/ tools come first on PATH; dav1d is linked statically from the
 # local build, and anything already on PKG_CONFIG_PATH is kept after it.
 export PATH := $(TOOLS):$(PATH)
@@ -54,7 +41,6 @@ export SYSTEM_DEPS_DAV1D_LINK := static
 .PHONY: help run build test clippy clean \
 	test-live install-desktop uninstall-desktop refresh-desktop-caches deb check-packager packaging-tools \
 	notices check-about cat-ginger \
-	run-spike run-spike-break build-spike test-spike clean-spike \
 	deps check-tools clean-deps
 
 help:
@@ -70,15 +56,8 @@ help:
 	@echo "make notices          third-party licence notices in $(NOTICES) (cargo-about $(ABOUT_VERSION))"
 	@echo "make packaging-tools  install cargo-packager and cargo-about at those versions"
 	@echo "make cat-ginger       rebuild the ginger cat's clips from its footage (uv, ffmpeg)"
-	@echo ""
-	@echo "make run-spike        build and launch the AV1 video spike (1280x720 window)"
-	@echo "make run-spike-break  same, fullscreen and see-through: the cat over the desktop"
-	@echo "make build-spike      release build of the spike"
-	@echo "make test-spike       the spike's unit tests"
-	@echo "make clean-spike      remove the spike's build output"
 	@echo "make deps             build dav1d $(DAV1D_TAG) and its build tools into .deps/"
 	@echo "make clean-deps       remove .deps/"
-	@echo "Spike variables: ENTRY LOOP SECS=$(SECS) THREADS=$(THREADS) SEE_THROUGH ON_TOP FULLSCREEN"
 
 # ---- the app ----------------------------------------------------------------
 
@@ -218,24 +197,6 @@ cat-ginger:
 	tools/encode.sh $(GINGER_CUT)/entry.mkv assets/cats/ginger/entry.ivf 24
 	tools/encode.sh $(GINGER_CUT)/sleep.mkv assets/cats/ginger/sleep.ivf 24
 
-# ---- AV1 video spike --------------------------------------------------------
-
-run-spike: build-spike $(ENTRY) $(LOOP)
-	SPIKE_SEE_THROUGH=$(SEE_THROUGH) SPIKE_ON_TOP=$(ON_TOP) SPIKE_FULLSCREEN=$(FULLSCREEN) \
-		$(SPIKE_BIN) $(ENTRY) $(LOOP) $(SECS) $(THREADS)
-
-run-spike-break:
-	@$(MAKE) --no-print-directory run-spike SEE_THROUGH=1 FULLSCREEN=1
-
-build-spike: check-tools $(DAV1D_LIB)
-	cargo build --release --manifest-path $(SPIKE)/Cargo.toml
-
-test-spike: check-tools $(DAV1D_LIB)
-	cargo test --release --manifest-path $(SPIKE)/Cargo.toml
-
-clean-spike:
-	cargo clean --manifest-path $(SPIKE)/Cargo.toml
-
 # ---- dav1d and its build tools ------------------------------------------------
 
 deps: $(DAV1D_LIB)
@@ -282,6 +243,3 @@ check-tools:
 		echo "Debian/Ubuntu: sudo apt install build-essential git python3-venv curl pkg-config; Rust via https://rustup.rs" >&2; \
 		exit 1; \
 	fi
-
-$(CLIPS)/%.ivf:
-	@echo "missing clip $@: encode it as in $(SPIKE)/README.md (Clip format)" >&2; exit 1

@@ -13,7 +13,7 @@ i-slint-backend-winit = { path = "patches/i-slint-backend-winit" }
 
 Why: desktop Slint (winit + femtovg) is 10.1 MB stripped as shipped; with
 these edits it's 5.2 MB. Measurements, rendering check and costs are in
-`spikes/slint-size/README.md`.
+`spikes/slint-size/README.md` on the `experiment` branch.
 
 | Crate | Edit | Saves | Cost |
 |---|---|---|---|

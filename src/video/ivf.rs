@@ -1,4 +1,5 @@
-//! Minimal IVF container reader (from `spikes/av1-video`).
+//! Minimal IVF container reader, from the AV1 video spike (`spikes/av1-video`
+//! on the `experiment` branch).
 //!
 //! IVF layout (all integers little-endian):
 //! - 32-byte file header: "DKIF", version u16, header size u16, fourcc [u8; 4],

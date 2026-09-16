@@ -3,7 +3,7 @@
 # ubuntu:26.04 has glibc 2.43, the newest; ubuntu:22.04 has 2.35, which
 # covers Ubuntu 22.04+, Mint 21+, Debian 12+ and current Fedora and Arch.
 # It runs on pushes to main and on v* tags, and by hand (Actions → deb →
-# Run workflow).
+# Run workflow). A v* tag also drafts a GitHub release (the release job).
 name: deb
 
 on:
@@ -100,3 +100,54 @@ jobs:
           name: deb-glibc${{ steps.check.outputs.glibc }}
           path: target/release/*.deb
           if-no-files-found: error
+
+  # A v* tag, once both packages are built, makes a draft release with the
+  # oldest-glibc package: it installs everywhere the others do, so nobody has
+  # to choose. The notes come from .github/release-notes.md. Publishing the
+  # draft is done by hand, after a look.
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: deb
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: deb-glibc*
+          path: dist
+
+      - name: Check the tag and pick the package
+        id: package
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          test -n "$version"
+          test "$GITHUB_REF_NAME" = "v$version" || { echo "tag $GITHUB_REF_NAME, Cargo.toml $version"; exit 1; }
+          glibc=$(ls dist | sed -n 's/^deb-glibc//p' | sort -V | head -n 1)
+          test -n "$glibc"
+          debs=(dist/deb-glibc"$glibc"/*.deb)
+          test "${#debs[@]}" -eq 1
+          test -f "${debs[0]}"
+          package="$(basename "${debs[0]}" .deb)_glibc$glibc.deb"
+          mkdir release
+          cp "${debs[0]}" "release/$package"
+          (cd release && sha256sum "$package" > SHA256SUMS)
+          sed -e "s/@VERSION@/$version/g" -e "s/@GLIBC@/$glibc/g" -e "s/@PACKAGE@/$package/g" \
+            .github/release-notes.md > notes.md
+          if grep -n '@[A-Z]*@' notes.md; then exit 1; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Katteir $VERSION" --notes-file notes.md release/*

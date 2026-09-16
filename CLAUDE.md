@@ -27,12 +27,13 @@ once, in `Cargo.toml` (§5, Names).
 - **Footprint is a feature.** Target ≤ 7 MB stripped binary per platform
   excluding cat assets. This was raised from 5 MB on 2026-09-14: desktop Slint
   is 5.2 MB even with `patches/` applied, and dav1d plus the video code is
-  ~1.3 MB (see `spikes/slint-size/`). M1 was 7.20 MB until zbus was patched
-  out of Slint (`patches/README.md`), then 6.32 MB; with M2's notifications,
-  tray and layer-shell cat window it's 6.52 MB. The bundled cat's clips
-  are embedded too (2.83 MB, §5) and don't count against the budget: on
-  2026-09-15 the binary was 9.39 MB with them, 6.56 MB without. If a
-  dependency adds megabytes, justify it in this file or drop it.
+  ~1.3 MB (see `spikes/slint-size/`, on the `experiment` branch). M1 was
+  7.20 MB until zbus was patched out of Slint (`patches/README.md`), then
+  6.32 MB; with M2's notifications, tray and layer-shell cat window it's
+  6.52 MB. The bundled cat's clips are embedded too (2.83 MB, §5) and don't
+  count against the budget: on 2026-09-15 the binary was 9.39 MB with them,
+  6.56 MB without. If a dependency adds megabytes, justify it in this file
+  or drop it.
 - Behaviour to match (observed from the original extension):
   - Cat sequence = one **entry** clip (the reference clip is ~11 s: the cat
     walks in, turns and lies down) followed by a looping **sleep** clip.
@@ -57,7 +58,7 @@ once, in `Cargo.toml` (§5, Names).
 | UI | `slint` `=1.17.1`, **patched** | `backend-winit` + `renderer-femtovg` (OpenGL ES). The cat is drawn from a GL texture, which the software renderer can't show, and a renderer is chosen once per process. **Never Skia.** `i-slint-core` and `i-slint-backend-winit` come from `patches/` via `[patch.crates-io]` (10.1 → 5.2 MB): no complex-script line breaking, no runtime SVG/PNG/JPEG decoding (so no image files in `.slint`; draw icons as `Path`s or pass raw RGBA), a plain title bar on GNOME Wayland, and no XDG portal settings watcher (it pulls in zbus, 0.88 MB; Slint no longer follows the desktop's colour scheme, accent, font or cursor blink, and our theme is fixed anyway). Upgrading Slint means re-applying them (`patches/README.md`). `i-slint-common` is also listed directly, only to enable `fontconfig-dlopen` (fontconfig loaded at runtime, not linked). |
 | GL calls | `glow` | Raw GL for the video shader, only in `src/video/`. ~33 KiB. |
 | Window/overlay | Slint `Window` props: the cat window is fullscreen, `no-frame`, `background: transparent` and `always-on-top`. On Wayland compositors with layer-shell it's a surface of our own on the overlay layer instead | Always an overlay; the opaque fullscreen mode was dropped on 2026-09-14. `always-on-top` does nothing on Wayland, hence layer-shell (§5). Our own Slint platform (`src/platform/backend.rs`) wraps the winit backend; `i-slint-backend-winit`, `i-slint-core` and `i-slint-renderer-femtovg` are direct dependencies for it, pinned `=1.17.1`. Layer-shell uses smithay-client-toolkit 0.19.2, wayland-client, glutin and raw-window-handle at the versions winit already pulls in: no new crates, +86 KB. |
-| Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/`. |
+| Cat animation | AV1 video (stacked alpha, IVF files), decoded in software by `dav1d` on a worker thread. The Y/U/V planes go up as GL textures, one shader turns them into RGBA, and Slint shows the result via `BorrowedOpenGLTextureBuilder`. `slint::Timer` paces frames at the clip rate. | `dav1d` crate + static libdav1d, 8-bit only: ~1.3 MB with our video code. 720p/30: ~32% of one core on an i5-1235U (Slint alone 3%). No ffmpeg at runtime. Hardware decode is a possible later optimisation, not a dependency. Validated in `spikes/av1-video/` (on the `experiment` branch). |
 | Tray | Linux: our own StatusNotifierItem + dbusmenu on the D-Bus client below (+54 KB). macOS/Windows: `tray-icon` | Not `ksni`: it and `notify-rust` need zbus, measured on 2026-09-14 at +1.21 MB and 58 crates (the app 6.32 → 7.53 MB). Do NOT enable `tray-icon`'s Linux backends (GTK/libappindicator, or `ksni`). |
 | Notifications | Linux: `org.freedesktop.Notifications` through our own blocking D-Bus client, `src/platform/linux/` (+35 KB, no dependencies). macOS/Windows: decided in M2 | Not `notify-rust` (zbus, see Tray). |
 | Config | `directories` + `serde` + `toml` | `$XDG_CONFIG_HOME/katteir/config.toml` etc. (schema in §5). With logging, errors and our own code, M0 is 5.84 MB stripped against 5.19 MB for Slint alone, so ~0.65 MB. |
@@ -85,8 +86,9 @@ katteir/
 ├── CLAUDE.md
 ├── README.md                # for people: what Katteir is, install, build, settings, credits
 ├── LICENSE-MIT, LICENSE-APACHE  # the code's licence: MIT OR Apache-2.0 (§7)
-├── Makefile                 # dev entry points: make run, test, clippy, deb, run-spike (make help)
-├── .github/workflows/deb.yml  # the .deb, built in ubuntu:26.04 and ubuntu:22.04 (glibc 2.43 and 2.35, §6)
+├── Makefile                 # dev entry points: make run, test, clippy, deb (make help)
+├── .github/workflows/deb.yml  # the .deb, built in ubuntu:26.04 and ubuntu:22.04 (glibc 2.43 and 2.35); v* tags draft a release (§6)
+├── .github/release-notes.md   # the release notes template: @VERSION@, @GLIBC@, @PACKAGE@ filled in by the release job
 ├── Cargo.toml               # also the app's names and the .deb: [package.metadata.packager] (§5, §6)
 ├── build.rs                 # compiles the UI; hands the names to Rust (env!) and Slint (@app-info), and the clip-fields feature to Slint
 ├── ui/
@@ -141,7 +143,6 @@ katteir/
 │   ├── encode.sh            # ffmpeg: source video → stacked-alpha AV1 IVF (dev-time only)
 │   └── icons.sh             # ffmpeg + librsvg: the icon SVG → raw ARGB pixels (dev-time only)
 ├── patches/                 # Cargo.toml-patched Slint crates (see patches/README.md)
-├── spikes/                  # throwaway experiments, each with a README of results
 ├── dev-assets/              # gitignored local test material (see §7)
 └── tests/
 ```
@@ -159,7 +160,7 @@ Follow **TigerStyle** and **NASA's Power of Ten** as adapted for Rust:
   and GL textures when a break starts and free them when it ends. No
   per-frame allocation in the animation path, and none in the timer tick.
   Known gap: the `dav1d` crate boxes each packet in `send_data` (see
-  `spikes/av1-video/README.md`).
+  `spikes/av1-video/README.md`, on the `experiment` branch).
 - **Small functions.** ≤ ~70 lines. One job. If it needs a comment to
   separate sections, split it.
 - **Explicit over clever.** Don't write macros; beyond `derive`/`thiserror`,
@@ -270,7 +271,8 @@ hold-to-dismiss pill sits bottom centre.
   aspect ratio. Timing per cat comes with a second cat.
 - Transparency works with femtovg on Wayland (Budgie 10.10 on labwc) and on
   X11 via XWayland: premultiplied output, checked by GL readback in
-  `spikes/av1-video`. Borderless fullscreen works on both (checked).
+  `spikes/av1-video` (on the `experiment` branch). Borderless fullscreen
+  works on both (checked).
 - Always-on-top works on X11 (`_NET_WM_STATE_ABOVE`, checked under XWayland)
   but does nothing on Wayland: winit's `set_window_level` is empty there, and
   xdg-shell has no such request.
@@ -337,8 +339,8 @@ hold-to-dismiss pill sits bottom centre.
   (frames 1280×1440). Both clips play at the footage's own rate: 24 fps
   for the ginger cat, as AI video is 24 fps and no frames are invented to
   reach 30. Its loop ran at 12 fps until 2026-09-15, and the breathing
-  moved in visible steps. 1080p drops frames on a 15 W
-  laptop (see the spike README).
+  moved in visible steps. 1080p drops frames on a 15 W laptop (see
+  `spikes/av1-video/README.md`, on the `experiment` branch).
 - **The ginger cat** (`assets/cats/ginger/`, 2.8 MB): 30 s of AI footage
   (§7) made by `tools/cutout.py` into a 13 s entry (312 frames) and a
   20.5 s loop (492).
@@ -511,8 +513,6 @@ make install-desktop                       # desktop entry + icon in ~/.local/sh
 make deb                                   # Debian package in target/release (cargo-packager, see below)
 make notices                               # third-party licence notices in target/ (cargo-about, §7)
 make packaging-tools                       # cargo-packager and cargo-about at the pinned versions (CI's containers)
-make run-spike                             # the AV1 video spike (builds dav1d into .deps/ first)
-make run-spike-break                       # same, fullscreen + see-through
 cargo run                                  # dev (femtovg / OpenGL ES)
 cargo test && cargo clippy --all-targets -- -D warnings
 cargo zigbuild --release --target x86_64-pc-windows-gnu
@@ -580,6 +580,18 @@ icon under the app id's name.
   the artifact `deb-glibc<version>`. A zigbuild for glibc 2.28, deferred
   on 2026-09-15, would only add RHEL 8 and 9 and their rebuilds; dropped
   on 2026-09-16.
+- **Releases** (decided 2026-09-16): a `v*` tag on `main` runs the
+  `release` job once both packages are built. It fails unless the tag is
+  `v` + the `Cargo.toml` version, so bump the version first. It takes the
+  oldest-glibc package only (it installs everywhere the others do, so
+  nobody has to choose), names it `katteir_<version>_amd64_glibc<glibc>.deb`,
+  adds `SHA256SUMS`, and creates a **draft** release, "Katteir <version>",
+  with notes from `.github/release-notes.md`. Jonathan publishes the draft
+  by hand. Only that job has `contents: write`. The notes' distro list
+  (Ubuntu 22.04+, Mint 21+, Debian 12+) is written for glibc 2.35: change
+  it if the oldest container changes. Nothing else creates releases, and
+  the repo is private for now, so releases are visible only to people with
+  access to it.
 
 ## 7. Assets policy
 
@@ -652,9 +664,9 @@ icon under the app id's name.
    (work minutes, start/pause/stop), `timer.rs` + tests, config round-trip.
    Runs on Linux with the femtovg renderer.
 2. **M1 — the cat** (done): `CatWindow` overlay, `src/video/` ported from
-   `spikes/av1-video/`, a bundled placeholder cat, slide-in, sleep loop,
-   press-and-hold dismiss, and a timed break with a countdown badge (which
-   replaced `min_break_secs`).
+   `spikes/av1-video/` (now on the `experiment` branch), a bundled
+   placeholder cat, slide-in, sleep loop, press-and-hold dismiss, and a
+   timed break with a countdown badge (which replaced `min_break_secs`).
 3. **M2 — platform layer** (in progress): Linux notifications and tray
    (done, both on our own D-Bus client, checked on Budgie/labwc). Still to
    verify on KDE, Sway, and GNOME, which shows no tray without the
@@ -669,11 +681,11 @@ icon under the app id's name.
 5. **M4 — ship**: `cargo-packager` bundles, CI matrix (Linux/macOS/Windows),
    size budget check in CI (fail if the stripped binary, less the embedded
    cat's clips, is over 7 MB). The .deb is done (`make deb`, 2026-09-15),
-   and since 2026-09-16 a workflow builds it for glibc 2.43 and 2.35
-   (§6). Then the AppImage. Packages will be hosted as GitHub Releases
-   (later). A package needs the glibc it was built against or newer (apt
-   enforces it through `Depends`), so the release notes must state each
-   package's baseline.
+   and since 2026-09-16 a workflow builds it for glibc 2.43 and 2.35, and
+   a `v*` tag drafts a GitHub release with the glibc 2.35 package (§6).
+   Then the AppImage. A package needs the glibc it was built against or
+   newer (apt enforces it through `Depends`), so the release notes state
+   the baseline.
 6. **Later / optional**: per-app triggers, stats, stir on click (set aside
    on 2026-09-14), and a no-OpenGL
    fallback that draws the video in software (deferred on 2026-09-14).
@@ -685,6 +697,13 @@ icon under the app id's name.
 
 - Before writing code, state the plan in ≤ 5 bullets, then do it. Small PRs,
   one milestone item at a time.
+- **Branches** (decided 2026-09-16): work happens on `staging`. `main`
+  only receives it, by a pull request Jonathan opens, and is what the
+  .deb workflow builds; nothing pushed to `staging` starts a build.
+  `experiment` keeps the early spikes (`spikes/av1-video`,
+  `spikes/slint-size`, their READMEs and the Makefile targets that ran
+  them) as of `9061e2c`, and is never merged: `staging` holds only the
+  app. History is never rewritten on any of them.
 - Read `Cargo.toml`, `ui/app.slint` and the module you're editing first.
 - Run `cargo test` and `cargo clippy --all-targets -- -D warnings` after every
   change and report the output truthfully. Never claim green without running.
